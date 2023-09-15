@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"strings"
 
@@ -189,11 +188,8 @@ func (fp *ForwardProxy) handleForward(request *headers.HttpRequestHeader, conn n
 func (fp *ForwardProxy) Handle(conn net.Conn) {
 	headerBytes := make([]byte, 1)
 	_, err := conn.Read(headerBytes)
-	if err == io.EOF {
-		return
-	}
 	if err != nil {
-		fmt.Println("Error occured reading request byte:", err)
+		return
 	}
 	requestHandler := fp.requestHandlers[string(headerBytes)]
 	if requestHandler != nil {
