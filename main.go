@@ -45,7 +45,7 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:  "key",
-						Value: "testingKey",
+						Value: proxy.DUMMY_KEY,
 						Usage: "API key for proxy server",
 					},
 					&cli.StringFlag{
