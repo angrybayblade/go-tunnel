@@ -3,112 +3,160 @@ package proxy
 import (
 	"fmt"
 	"net"
-	"strings"
+	"os"
+	"strconv"
+	"sync"
+	"time"
 
+	"github.com/angrybayblade/tunnel/proxy/headers"
 	"github.com/urfave/cli/v2"
 )
 
+const DUMMY_KEY string = "0000000000000000000000000000000000000000000"
+
 type ReverseProxy struct {
-	addr        Addr
-	ln          net.Listener
-	quitch      chan struct{}
-	connections map[string]net.Conn
+	addr       Addr
+	uri        string
+	key        string
+	sessionKey string
+	quitch     chan struct{}
+	waitGroup  *sync.WaitGroup
 }
 
-func (rp *ReverseProxy) Start() error {
-	ln, err := net.Listen(
-		"tcp", rp.addr.ToString(),
-	)
+func (rp *ReverseProxy) Connect() {
+	conn, err := net.Dial("tcp", rp.uri)
 	if err != nil {
-		return err
+		fmt.Println("Failed connecting to the proxy:", err.Error())
+		os.Exit(1)
 	}
-	defer ln.Close()
 
-	rp.connections = make(map[string]net.Conn)
-	rp.ln = ln
-	go rp.Listen()
+	createRequest := &headers.ProxyHeader{
+		Code: headers.RP_REQUEST_CREATE,
+		Key:  rp.key,
+	}
+	_, err = createRequest.Write(conn)
+	if err != nil {
+		fmt.Println("Failed creating session:", err.Error())
+		os.Exit(1)
+	}
 
-	// Replace with waitgroup
-	<-rp.quitch
-	return nil
+	createResponse := &headers.ProxyHeader{}
+	err = createResponse.Read(conn)
+	if err != nil {
+		fmt.Println("Could not get the response from the proxy:", err.Error())
+		os.Exit(1)
+	}
+
+	if createResponse.Code == headers.FP_STATUS_SUCCESS {
+		rp.sessionKey = createResponse.Key
+		return
+	}
+
+	if createResponse.Code == headers.FP_STATUS_AUTH_ERROR {
+		fmt.Println("Invalid authentication key provided")
+		os.Exit(1)
+	}
 }
 
-func (rp *ReverseProxy) Listen() {
+func (rp *ReverseProxy) Listen(id int) {
+	var joinRequest *headers.ProxyHeader
+	var joinResponse *headers.ProxyHeader
 	for {
-		conn, err := rp.ln.Accept()
+		proxyDial, err := net.Dial("tcp", rp.uri)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("Failed connecting to the proxy:", err.Error())
+			time.Sleep(3 * time.Second)
 			continue
 		}
-		fmt.Println("Received connection from", conn.RemoteAddr())
-		go rp.Handle(conn)
-	}
-}
 
-func (rp *ReverseProxy) Handle(conn net.Conn) {
-	var lbytes []byte
-	var lstring string
-	var head_split []string
-
-	headers := make(map[string]string)
-	headerBytes := make([]byte, 0)
-	lbytes, lstring = readHeaderLine(conn)
-	head_split = strings.Split(lstring, " ")
-	if head_split[0] == "CREATE" {
-		conn.Write([]byte("0"))
-		key := head_split[1][:4]
-		rp.connections[key] = conn
-	} else {
-		var r_host string
-		var header_split []string
-		headerBytes = append(headerBytes, lbytes...)
-		for {
-			lbytes, lstring = readHeaderLine(conn)
-			headerBytes = append(headerBytes, lbytes...)
-			header_split = strings.SplitN(lstring, ": ", 2)
-
-			// TODO: Investigate
-			if len(header_split) == 1 {
-				break
-			}
-			headers[header_split[0]] = header_split[1]
+		joinRequest = &headers.ProxyHeader{
+			Code:    headers.RP_REQUEST_JOIN,
+			Key:     rp.sessionKey,
+			Message: strconv.Itoa(id),
 		}
-		r_host = strings.Split(headers["Host"], ".")[0]
-		fmt.Println("Forwarding request for", r_host)
-		r_conn := rp.connections[r_host]
-		r_conn.Write(headerBytes)
+		_, err = joinRequest.Write(proxyDial)
+		if err != nil {
+			fmt.Println("Failed joining the proxy pool:", err.Error())
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		joinResponse = &headers.ProxyHeader{}
+		err = joinResponse.Read(proxyDial)
+		if err != nil {
+			fmt.Println("Could not get the response from the proxy:", err.Error())
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		if joinResponse.Code == headers.FP_STATUS_AUTH_ERROR {
+			fmt.Println("Invalid session key provided")
+			return
+		}
+
+		if joinResponse.Code == headers.FP_STATUS_MAX_CONNECTIONS_LIMIT_REACHED {
+			fmt.Println("Max connections limit reached")
+			return
+		}
+
+		localDial, err := net.Dial("tcp", rp.addr.ToString())
+		if err != nil {
+			fmt.Println("Error connecting to local server:", err)
+			return
+		}
+
 		pumpBytes := make([]byte, 1024)
 		for {
-			n, err := r_conn.Read(pumpBytes)
+			n, err := proxyDial.Read(pumpBytes)
 			if err != nil {
-				conn.Close()
-				r_conn.Close()
-				return
+				break
 			}
-			conn.Write(pumpBytes[:n])
+			localDial.Write(pumpBytes[:n])
+			if string(pumpBytes[n-4:n]) == headers.HTTP_HEADER_SEPARATOR {
+				break
+			}
 		}
+		for {
+			n, err := localDial.Read(pumpBytes)
+			if err != nil {
+				break
+			}
+			proxyDial.Write(pumpBytes[:n])
+		}
+		localDial.Close()
+		proxyDial.Close()
 	}
 }
 
-func (rp *ReverseProxy) Stop() {
-	rp.ln.Close()
+func (rp *ReverseProxy) CreatePool() {
+	rp.waitGroup = new(sync.WaitGroup)
+	for id := 0; id < MAX_CONNECTION_POOL_SIZE; id++ {
+		go rp.Listen(id)
+		rp.waitGroup.Add(1)
+	}
 }
 
-func Listen(cCtx *cli.Context) error {
+func (rp *ReverseProxy) Wait() {
+	fmt.Println("Started reverse proxy @", "http://"+rp.sessionKey+"."+"localhost")
+	rp.waitGroup.Wait()
+}
+
+func Forward(cCtx *cli.Context) error {
 	var port int = cCtx.Int("port")
 	var host string = cCtx.String("host")
-
-	fmt.Printf("Starting listener @ %s:%d\n", host, port)
-	listener := &ReverseProxy{
+	var key string = cCtx.String("key")
+	var uri string = cCtx.String("proxy")
+	proxy := &ReverseProxy{
 		addr: Addr{
 			host: host,
 			port: port,
 		},
+		key:    key,
+		uri:    uri,
 		quitch: make(chan struct{}),
 	}
-	err := listener.Start()
-	if err != nil {
-		panic(err)
-	}
+	proxy.Connect()
+	proxy.CreatePool()
+	proxy.Wait()
 	return nil
 }
