@@ -1,35 +1,19 @@
 package proxy
 
 import (
-	"net"
+	"crypto/sha256"
+	"encoding/base64"
 	"strconv"
+	"strings"
 )
 
-const HEADER_LINE_SEPARATOR string = "\r\n"
-const HEADER_SEPARATOR string = "\r\n\r\n"
+const API_KEY_LEN int = 43
+const MAX_CONNECTION_POOL_SIZE int = 5
 
-var HEADER_LINE_SEPARATOR_BYTES []byte = []byte(HEADER_LINE_SEPARATOR)
-var HEADER_SEPARATOR_BYTES []byte = []byte(HEADER_SEPARATOR)
-
-func readHeaderLine(conn net.Conn) ([]byte, string) {
-	headerBytes := make([]byte, 0)
-	rBuffer := make([]byte, 1)
-	var parsed string
-	for {
-		_, err := conn.Read(rBuffer)
-		if err != nil {
-			continue
-		}
-		headerBytes = append(headerBytes, rBuffer...)
-		parsed = string(headerBytes)
-		idx := len(parsed) - 2
-		if idx < 0 {
-			continue
-		}
-		if parsed[idx:] == HEADER_LINE_SEPARATOR {
-			return headerBytes, parsed[:idx]
-		}
-	}
+func createSesssionKey(key []byte) string {
+	s := sha256.New()
+	s.Write(key)
+	return strings.ToLower(base64.URLEncoding.EncodeToString(s.Sum(nil))[:API_KEY_LEN])
 }
 
 type Addr struct {
