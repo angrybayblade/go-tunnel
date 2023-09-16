@@ -10,6 +10,8 @@ import (
 
 func main() {
 	app := &cli.App{
+		Name:  "tunnel",
+		Usage: "A naive HTTP tunnel implementation",
 		Commands: []*cli.Command{
 			{
 				Name:   "listen",
@@ -30,7 +32,7 @@ func main() {
 			},
 			{
 				Name:   "forward",
-				Usage:  "Forward the port to the given listner service",
+				Usage:  "Forward the port to the given proxy service",
 				Action: proxy.Forward,
 				Flags: []cli.Flag{
 					&cli.IntFlag{
