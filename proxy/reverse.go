@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,8 +24,15 @@ type ReverseProxy struct {
 	waitGroup  *sync.WaitGroup
 }
 
+func (rp *ReverseProxy) URI() string {
+	if strings.Contains(rp.uri, ":") {
+		return rp.uri
+	}
+	return rp.uri + ":" + "80"
+}
+
 func (rp *ReverseProxy) Connect() {
-	conn, err := net.Dial("tcp", rp.uri)
+	conn, err := net.Dial("tcp", rp.URI())
 	if err != nil {
 		fmt.Println("Failed connecting to the proxy:", err.Error())
 		os.Exit(1)
@@ -62,7 +70,7 @@ func (rp *ReverseProxy) Listen(id int) {
 	var joinRequest *headers.ProxyHeader
 	var joinResponse *headers.ProxyHeader
 	for {
-		proxyDial, err := net.Dial("tcp", rp.uri)
+		proxyDial, err := net.Dial("tcp", rp.URI())
 		if err != nil {
 			fmt.Println("Failed connecting to the proxy:", err.Error())
 			time.Sleep(3 * time.Second)
@@ -102,7 +110,8 @@ func (rp *ReverseProxy) Listen(id int) {
 		localDial, err := net.Dial("tcp", rp.addr.ToString())
 		if err != nil {
 			fmt.Println("Error connecting to local server:", err)
-			return
+			time.Sleep(3 * time.Second)
+			continue
 		}
 
 		pumpBytes := make([]byte, 1024)
@@ -137,7 +146,7 @@ func (rp *ReverseProxy) CreatePool() {
 }
 
 func (rp *ReverseProxy) Wait() {
-	fmt.Println("Started reverse proxy @", "http://"+rp.sessionKey+"."+"localhost")
+	fmt.Println("Started reverse proxy @", "http://"+rp.sessionKey+"."+rp.uri)
 	rp.waitGroup.Wait()
 }
 

@@ -202,7 +202,6 @@ func (fp *ForwardProxy) Handle(conn net.Conn) {
 		if err != nil {
 			fmt.Println(err)
 		}
-
 		fp.handleForward(requestHeader, conn)
 	}
 
