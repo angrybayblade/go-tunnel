@@ -17,13 +17,13 @@ import (
 const DUMMY_KEY string = "0000000000000000000000000000000000000000000"
 
 type ReverseProxy struct {
-	addr       Addr
-	uri        string
-	key        string
-	sessionKey string
-	quitch     chan struct{}
-	waitGroup  *sync.WaitGroup
-	logger     *log.Logger
+	addr        Addr
+	uri         string
+	key         string
+	sessionKey  string
+	waitGroup   *sync.WaitGroup
+	logger      *log.Logger
+	connections chan int
 }
 
 func (rp *ReverseProxy) URI() string {
@@ -59,6 +59,10 @@ func (rp *ReverseProxy) Connect() {
 
 	if createResponse.Code == headers.FP_STATUS_SUCCESS {
 		rp.sessionKey = createResponse.Key
+		rp.connections = make(chan int, MAX_CONNECTION_POOL_SIZE)
+		for id := 0; id < MAX_CONNECTION_POOL_SIZE; id++ {
+			rp.connections <- id
+		}
 		return
 	}
 
@@ -66,19 +70,23 @@ func (rp *ReverseProxy) Connect() {
 		rp.logger.Fatalln("Invalid authentication key provided")
 		os.Exit(1)
 	}
+
 }
 
-func (rp *ReverseProxy) Listen(id int) {
+func (rp *ReverseProxy) Listen() {
+	var id int
 	var joinRequest *headers.ProxyHeader
 	var joinResponse *headers.ProxyHeader
+
+	fmt.Println("Starting reverse proxy @", "http://"+rp.sessionKey+"."+rp.uri)
 	for {
+		id = <-rp.connections
 		proxyDial, err := net.Dial("tcp", rp.URI())
 		if err != nil {
 			rp.logger.Fatalln("Failed connecting to the proxy:", err.Error())
 			time.Sleep(3 * time.Second)
 			continue
 		}
-
 		joinRequest = &headers.ProxyHeader{
 			Code:    headers.RP_REQUEST_JOIN,
 			Key:     rp.sessionKey,
@@ -109,42 +117,54 @@ func (rp *ReverseProxy) Listen(id int) {
 			return
 		}
 
-		localDial, err := net.Dial("tcp", rp.addr.ToString())
-		if err != nil {
-			rp.logger.Fatalln("Error connecting to local server:", err)
-			time.Sleep(3 * time.Second)
-			continue
-		}
-
-		pumpBytes := make([]byte, 1024)
-		for {
-			n, err := proxyDial.Read(pumpBytes)
-			if err != nil {
-				break
-			}
-			localDial.Write(pumpBytes[:n])
-			if string(pumpBytes[n-4:n]) == headers.HTTP_HEADER_SEPARATOR {
-				break
-			}
-		}
-		for {
-			n, err := localDial.Read(pumpBytes)
-			if err != nil {
-				break
-			}
-			proxyDial.Write(pumpBytes[:n])
-		}
-		localDial.Close()
-		proxyDial.Close()
+		initByte := make([]byte, 1)
+		proxyDial.Read(initByte)
+		go rp.Pump(proxyDial, initByte, id)
 	}
 }
 
-func (rp *ReverseProxy) CreatePool() {
-	rp.waitGroup = new(sync.WaitGroup)
-	for id := 0; id < MAX_CONNECTION_POOL_SIZE; id++ {
-		go rp.Listen(id)
-		rp.waitGroup.Add(1)
+func (rp *ReverseProxy) Pump(proxyDial net.Conn, initByte []byte, id int) {
+	localDial, err := net.Dial("tcp", rp.addr.ToString())
+	if err != nil {
+		rp.logger.Fatalln("Error connecting to local server:", err)
+		response := [][]byte{
+			[]byte("HTTP/1.1 200 OK\r\n"),
+			[]byte("Date: Thu, 14 Sep 2023 12:28:53 GMT\r\n"),
+			[]byte("Server: Go-Tunnel/0.1.0 (Ubuntu)\r\n"),
+			[]byte("Content-Length: 47\r\n"),
+			[]byte("Content-Type: text/html\r\n"),
+			[]byte("Connection: Closed\r\n"),
+			[]byte("\r\n"),
+			[]byte("{\"error\": \"Cannot connect to the local adress\"}"),
+		}
+		for _, l := range response {
+			proxyDial.Write(l)
+		}
+		proxyDial.Close()
+		return
 	}
+	pumpBytes := make([]byte, 1024)
+	localDial.Write(initByte)
+	for {
+		n, err := proxyDial.Read(pumpBytes)
+		if err != nil {
+			break
+		}
+		localDial.Write(pumpBytes[:n])
+		if string(pumpBytes[n-4:n]) == headers.HTTP_HEADER_SEPARATOR {
+			break
+		}
+	}
+	for {
+		n, err := localDial.Read(pumpBytes)
+		if err != nil {
+			break
+		}
+		proxyDial.Write(pumpBytes[:n])
+	}
+	localDial.Close()
+	proxyDial.Close()
+	rp.connections <- id
 }
 
 func (rp *ReverseProxy) Wait() {
@@ -162,15 +182,14 @@ func Forward(cCtx *cli.Context) error {
 			host: host,
 			port: port,
 		},
-		key:    key,
-		uri:    uri,
-		quitch: make(chan struct{}),
+		key: key,
+		uri: uri,
 		logger: log.New(
 			os.Stdout, "RP: ", log.Ltime,
 		),
 	}
 	proxy.Connect()
-	proxy.CreatePool()
+	proxy.Listen()
 	proxy.Wait()
 	return nil
 }
