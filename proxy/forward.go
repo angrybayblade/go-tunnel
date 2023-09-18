@@ -59,7 +59,7 @@ func (s *Session) Join(id string, conn net.Conn) {
 }
 
 func (s *Session) Forward(requestHeader *headers.HttpRequestHeader, rquestConn net.Conn) {
-	if len(s.free) == 0 {
+	if s.connected <= 0 {
 		// TODO: Extract to method
 		response := [][]byte{
 			[]byte("HTTP/1.1 200 OK\r\n"),
@@ -75,6 +75,7 @@ func (s *Session) Forward(requestHeader *headers.HttpRequestHeader, rquestConn n
 			rquestConn.Write(l)
 		}
 		rquestConn.Close()
+		return
 	}
 	freeConnectionIndex := s.free[0]
 	s.free = s.free[1:]
