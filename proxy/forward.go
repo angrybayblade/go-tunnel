@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"fmt"
+	"log"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/angrybayblade/tunnel/proxy/headers"
@@ -89,6 +91,7 @@ type ForwardProxy struct {
 	ln              net.Listener
 	sessions        map[string]*Session
 	requestHandlers map[string]interface{}
+	logger          *log.Logger
 }
 
 func (fp *ForwardProxy) Start() error {
@@ -117,7 +120,7 @@ func (fp *ForwardProxy) Listen() {
 	for {
 		conn, err := fp.ln.Accept()
 		if err != nil {
-			fmt.Println(err)
+			fp.logger.Fatalln(err)
 			continue
 		}
 		go fp.Handle(conn)
@@ -140,7 +143,7 @@ func (fp *ForwardProxy) handleCreate(request *headers.ProxyHeader, conn net.Conn
 }
 
 func (fp *ForwardProxy) handleJoin(request *headers.ProxyHeader, conn net.Conn) {
-	fmt.Println("Join request from: " + request.Key + " with connection id: " + request.Message)
+	fp.logger.Println("Join request from: " + request.Key + " with connection id: " + request.Message)
 	if fp.sessions[request.Key].connected >= MAX_CONNECTION_POOL_SIZE {
 		response := &headers.ProxyHeader{
 			Code: headers.FP_STATUS_MAX_CONNECTIONS_LIMIT_REACHED,
@@ -181,7 +184,7 @@ func (fp *ForwardProxy) handleForward(request *headers.HttpRequestHeader, conn n
 		conn.Close()
 		return
 	}
-	fmt.Println("Forwarding request for:", sessionKey)
+	fp.logger.Println("Forwarding request for:", sessionKey)
 	session.Forward(request, conn)
 }
 
@@ -200,7 +203,7 @@ func (fp *ForwardProxy) Handle(conn net.Conn) {
 		requestHeader := &headers.HttpRequestHeader{}
 		err = requestHeader.Read(conn, headerBytes)
 		if err != nil {
-			fmt.Println(err)
+			fp.logger.Println(err)
 		}
 		fp.handleForward(requestHeader, conn)
 	}
@@ -222,6 +225,9 @@ func Listen(cCtx *cli.Context) error {
 			port: port,
 		},
 		Quitch: make(chan struct{}),
+		logger: log.New(
+			os.Stdout, "FP: ", log.Ltime,
+		),
 	}
 	err := listener.Start()
 	if err != nil {

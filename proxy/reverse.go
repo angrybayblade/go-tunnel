@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strconv"
@@ -22,6 +23,7 @@ type ReverseProxy struct {
 	sessionKey string
 	quitch     chan struct{}
 	waitGroup  *sync.WaitGroup
+	logger     *log.Logger
 }
 
 func (rp *ReverseProxy) URI() string {
@@ -34,7 +36,7 @@ func (rp *ReverseProxy) URI() string {
 func (rp *ReverseProxy) Connect() {
 	conn, err := net.Dial("tcp", rp.URI())
 	if err != nil {
-		fmt.Println("Failed connecting to the proxy:", err.Error())
+		rp.logger.Fatalln("Failed connecting to the proxy:", err.Error())
 		os.Exit(1)
 	}
 
@@ -44,14 +46,14 @@ func (rp *ReverseProxy) Connect() {
 	}
 	_, err = createRequest.Write(conn)
 	if err != nil {
-		fmt.Println("Failed creating session:", err.Error())
+		rp.logger.Fatalln("Failed creating session:", err.Error())
 		os.Exit(1)
 	}
 
 	createResponse := &headers.ProxyHeader{}
 	err = createResponse.Read(conn)
 	if err != nil {
-		fmt.Println("Could not get the response from the proxy:", err.Error())
+		rp.logger.Fatalln("Could not get the response from the proxy:", err.Error())
 		os.Exit(1)
 	}
 
@@ -61,7 +63,7 @@ func (rp *ReverseProxy) Connect() {
 	}
 
 	if createResponse.Code == headers.FP_STATUS_AUTH_ERROR {
-		fmt.Println("Invalid authentication key provided")
+		rp.logger.Fatalln("Invalid authentication key provided")
 		os.Exit(1)
 	}
 }
@@ -72,7 +74,7 @@ func (rp *ReverseProxy) Listen(id int) {
 	for {
 		proxyDial, err := net.Dial("tcp", rp.URI())
 		if err != nil {
-			fmt.Println("Failed connecting to the proxy:", err.Error())
+			rp.logger.Fatalln("Failed connecting to the proxy:", err.Error())
 			time.Sleep(3 * time.Second)
 			continue
 		}
@@ -84,7 +86,7 @@ func (rp *ReverseProxy) Listen(id int) {
 		}
 		_, err = joinRequest.Write(proxyDial)
 		if err != nil {
-			fmt.Println("Failed joining the proxy pool:", err.Error())
+			rp.logger.Fatalln("Failed joining the proxy pool:", err.Error())
 			time.Sleep(3 * time.Second)
 			continue
 		}
@@ -92,24 +94,24 @@ func (rp *ReverseProxy) Listen(id int) {
 		joinResponse = &headers.ProxyHeader{}
 		err = joinResponse.Read(proxyDial)
 		if err != nil {
-			fmt.Println("Could not get the response from the proxy:", err.Error())
+			rp.logger.Fatalln("Could not get the response from the proxy:", err.Error())
 			time.Sleep(3 * time.Second)
 			continue
 		}
 
 		if joinResponse.Code == headers.FP_STATUS_AUTH_ERROR {
-			fmt.Println("Invalid session key provided")
+			rp.logger.Fatalln("Invalid session key provided")
 			return
 		}
 
 		if joinResponse.Code == headers.FP_STATUS_MAX_CONNECTIONS_LIMIT_REACHED {
-			fmt.Println("Max connections limit reached")
+			rp.logger.Fatalln("Max connections limit reached")
 			return
 		}
 
 		localDial, err := net.Dial("tcp", rp.addr.ToString())
 		if err != nil {
-			fmt.Println("Error connecting to local server:", err)
+			rp.logger.Fatalln("Error connecting to local server:", err)
 			time.Sleep(3 * time.Second)
 			continue
 		}
@@ -163,6 +165,9 @@ func Forward(cCtx *cli.Context) error {
 		key:    key,
 		uri:    uri,
 		quitch: make(chan struct{}),
+		logger: log.New(
+			os.Stdout, "RP: ", log.Ltime,
+		),
 	}
 	proxy.Connect()
 	proxy.CreatePool()
