@@ -26,7 +26,7 @@ func (c *Connection) Forward(requestHeader *headers.HttpRequestHeader, requestCo
 				break
 			}
 			c.conn.Write(pumpBytes[:n])
-			if string(pumpBytes[n-4:n]) == headers.HTTP_HEADER_SEPARATOR {
+			if string(pumpBytes[n-4:n]) == headers.HttpHeaderSeparator {
 				break
 			}
 		}

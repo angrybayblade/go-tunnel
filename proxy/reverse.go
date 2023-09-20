@@ -151,7 +151,7 @@ func (rp *ReverseProxy) Pump(proxyDial net.Conn, initByte []byte, id int) {
 			break
 		}
 		localDial.Write(pumpBytes[:n])
-		if string(pumpBytes[n-4:n]) == headers.HTTP_HEADER_SEPARATOR {
+		if string(pumpBytes[n-4:n]) == headers.HttpHeaderSeparator {
 			break
 		}
 	}
