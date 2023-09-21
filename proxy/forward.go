@@ -17,6 +17,7 @@ type Connection struct {
 }
 
 func (c *Connection) Forward(requestHeader *headers.HttpRequestHeader, requestConn net.Conn) {
+	// Investigate the usage of net.Pipe
 	pumpBytes := make([]byte, 1024)
 	requestHeader.Write(c.conn)
 	if requestHeader.Headers["Content-Length"] != "" {
@@ -58,9 +59,11 @@ func (s *Session) Join(id string, conn net.Conn) {
 	s.connected += 1
 }
 
-func (s *Session) Forward(requestHeader *headers.HttpRequestHeader, rquestConn net.Conn) {
+func (s *Session) Forward(requestHeader *headers.HttpRequestHeader, rquestConn net.Conn) error {
+	var err error
 	if s.connected <= 0 {
 		// TODO: Extract to method
+		defer rquestConn.Close()
 		response := [][]byte{
 			[]byte("HTTP/1.1 200 OK\r\n"),
 			[]byte("Date: Thu, 14 Sep 2023 12:28:53 GMT\r\n"),
@@ -72,10 +75,12 @@ func (s *Session) Forward(requestHeader *headers.HttpRequestHeader, rquestConn n
 			[]byte("{\"error\": \"No free connection available in the pool\"}"),
 		}
 		for _, l := range response {
-			rquestConn.Write(l)
+			_, err = rquestConn.Write(l)
+			if err != nil {
+				return fmt.Errorf("Request forward fail, no free connections available; Error writing response: %v", err)
+			}
 		}
-		rquestConn.Close()
-		return
+		return ErrForwardFailedNoFreeConnection
 	}
 	freeConnectionIndex := s.free[0]
 	s.free = s.free[1:]
@@ -84,44 +89,48 @@ func (s *Session) Forward(requestHeader *headers.HttpRequestHeader, rquestConn n
 	freeConnection.Forward(requestHeader, rquestConn)
 	delete(s.connections, freeConnectionIndex)
 	s.connected -= 1
+	return nil
 }
 
 type ForwardProxy struct {
 	Addr            Addr
-	Quitch          chan struct{}
-	ln              net.Listener
+	Logger          *log.Logger
+	Ln              net.Listener
+	quitch          chan error
 	sessions        map[string]*Session
 	requestHandlers map[string]interface{}
-	logger          *log.Logger
 }
 
 func (fp *ForwardProxy) Start() error {
-	ln, err := net.Listen(
+	Ln, err := net.Listen(
 		"tcp", fp.Addr.ToString(),
 	)
 	if err != nil {
 		return err
 	}
-	defer ln.Close()
+	defer Ln.Close()
+
+	fp.Ln = Ln
 	fp.sessions = make(map[string]*Session)
 	fp.requestHandlers = map[string]interface{}{
 		headers.RP_REQUEST_CREATE: fp.handleCreate,
 		headers.RP_REQUEST_JOIN:   fp.handleJoin,
 		headers.RP_REQUEST_DELETE: fp.handleDelete,
 	}
-	fp.ln = ln
+	fp.quitch = make(chan error)
+
+	// Start listener
 	go fp.Listen()
 
-	// Replace with waitgroup
-	<-fp.Quitch
-	return nil
+	// Wait for the process to complete
+	return <-fp.quitch
 }
 
 func (fp *ForwardProxy) Listen() {
 	for {
-		conn, err := fp.ln.Accept()
+		conn, err := fp.Ln.Accept()
 		if err != nil {
-			fp.logger.Fatalln(err)
+			// fp.Logger.Printf("Erorr accepting the connection")
 			continue
 		}
 		go fp.Handle(conn)
@@ -141,24 +150,34 @@ func (fp *ForwardProxy) handleCreate(request *headers.ProxyHeader, conn net.Conn
 		inUse:       make([]string, 0),
 	}
 	conn.Close()
+	fp.Logger.Println("/CREATE", sessionKey)
 }
 
 func (fp *ForwardProxy) handleJoin(request *headers.ProxyHeader, conn net.Conn) {
-	fp.logger.Println("Join request from: " + request.Key + " with connection id: " + request.Message)
 	if fp.sessions[request.Key].connected >= MAX_CONNECTION_POOL_SIZE {
 		response := &headers.ProxyHeader{
 			Code: headers.FP_STATUS_MAX_CONNECTIONS_LIMIT_REACHED,
 			Key:  request.Key,
 		}
-		response.Write(conn)
+		_, err := response.Write(conn)
+		if err != nil {
+			fp.Logger.Println("/JOIN", request.Key, "-> Error writing response:", err.Error())
+		} else {
+			fp.Logger.Println("/JOIN", request.Key, "-> No free connection available")
+		}
 	} else {
 		// request.Message represents connection id
 		response := &headers.ProxyHeader{
 			Code: headers.FP_STATUS_SUCCESS,
 			Key:  request.Key,
 		}
-		response.Write(conn)
-		fp.sessions[request.Key].Join(request.Message, conn)
+		_, err := response.Write(conn)
+		if err != nil {
+			fp.Logger.Println("/JOIN", request.Key, "-> Error writing response:", err.Error())
+		} else {
+			fp.sessions[request.Key].Join(request.Message, conn)
+			fp.Logger.Println("/JOIN", request.Key, "-> Connection ID:", request.Message)
+		}
 	}
 }
 
@@ -166,6 +185,7 @@ func (fp *ForwardProxy) handleDelete(request *headers.ProxyHeader, conn net.Conn
 }
 
 func (fp *ForwardProxy) handleForward(request *headers.HttpRequestHeader, conn net.Conn) {
+	var err error
 	sessionKey := strings.Split(request.Headers["Host"], ".")[0]
 	session := fp.sessions[sessionKey]
 	if session == nil {
@@ -180,19 +200,29 @@ func (fp *ForwardProxy) handleForward(request *headers.HttpRequestHeader, conn n
 			[]byte("{\"error\": \"No connection available in the pool\"}"),
 		}
 		for _, l := range response {
-			conn.Write(l)
+			_, err = conn.Write(l)
+			if err != nil {
+				fp.Logger.Println("Error writing response ... :", err.Error())
+				break
+			}
 		}
 		conn.Close()
-		return
+		fp.Logger.Println("/FORWARD", sessionKey, "-> No session found")
+	} else {
+		err = session.Forward(request, conn)
+		if err != nil {
+			fp.Logger.Println(err.Error())
+		} else {
+			fp.Logger.Println("/FORWARD", sessionKey, request.Method, request.Path, request.Protocol)
+		}
 	}
-	fp.logger.Println("Forwarding request for:", sessionKey)
-	session.Forward(request, conn)
 }
 
 func (fp *ForwardProxy) Handle(conn net.Conn) {
 	headerBytes := make([]byte, 1)
 	_, err := conn.Read(headerBytes)
 	if err != nil {
+		fp.Logger.Println("Error reading first request byte")
 		return
 	}
 	requestHandler := fp.requestHandlers[string(headerBytes)]
@@ -201,18 +231,20 @@ func (fp *ForwardProxy) Handle(conn net.Conn) {
 		requestHeader.ReadPartial(conn, headerBytes)
 		requestHandler.(func(*headers.ProxyHeader, net.Conn))(requestHeader, conn)
 	} else {
-		requestHeader := &headers.HttpRequestHeader{}
-		err = requestHeader.Read(conn, headerBytes)
+		requestHeader := &headers.HttpRequestHeader{
+			Buffer: headerBytes,
+		}
+		err = requestHeader.Read(conn)
 		if err != nil {
-			fp.logger.Println(err)
+			fp.Logger.Println(err)
+			return
 		}
 		fp.handleForward(requestHeader, conn)
 	}
-
 }
 
 func (fp *ForwardProxy) Stop() {
-	fp.ln.Close()
+	fp.Ln.Close()
 }
 
 func Listen(cCtx *cli.Context) error {
@@ -225,14 +257,10 @@ func Listen(cCtx *cli.Context) error {
 			host: host,
 			port: port,
 		},
-		Quitch: make(chan struct{}),
-		logger: log.New(
+		Logger: log.New(
 			os.Stdout, "FP: ", log.Ltime,
 		),
 	}
 	err := listener.Start()
-	if err != nil {
-		panic(err)
-	}
-	return nil
+	return err
 }
