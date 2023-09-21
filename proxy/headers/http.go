@@ -22,22 +22,22 @@ var Whitespace string = " "
 var HeaderSplit string = ": "
 
 func readHeaderLine(conn net.Conn) ([]byte, error) {
-	var readSize int
-	headerBytes := make([]byte, 0)
+	var readSize int = 0
 	rBuffer := make([]byte, 1)
+	lineBytes := make([]byte, 0)
 	for {
 		n, err := conn.Read(rBuffer)
 		if err != nil {
-			return headerBytes, err
+			return lineBytes, IncompleteHeaderLine
 		}
-		headerBytes = append(headerBytes, rBuffer...)
+		lineBytes = append(lineBytes, rBuffer...)
 		readSize += n
 		idx := readSize - HttpHeaderLineSeparatorLen
 		if idx < 0 {
 			continue
 		}
-		if bytes.Equal(headerBytes[idx:], HttpHeaderLineSeparatorBytes) {
-			return headerBytes, nil
+		if string(lineBytes[idx:]) == HttpHeaderLineSeparator {
+			return lineBytes[:idx], nil
 		}
 	}
 }
@@ -60,49 +60,54 @@ func (hreq *HttpRequestHeader) Build() []byte {
 	return []byte(header)
 }
 
-func (hreq *HttpRequestHeader) Read(conn net.Conn, buffer []byte) error {
-	hreq.Headers = make(map[string]string)
-	hreq.Buffer = make([]byte, 0)
-	if buffer != nil {
-		hreq.Buffer = append(hreq.Buffer, buffer...)
+func (hreq *HttpRequestHeader) Read(conn net.Conn) error {
+	var err error
+	var lineBytes []byte
+
+	if hreq.Headers == nil {
+		hreq.Headers = make(map[string]string)
 	}
 
-	lineBytes, err := readHeaderLine(conn)
+	if hreq.Buffer == nil {
+		hreq.Buffer = make([]byte, 0)
+	}
+
+	lineBytes, err = readHeaderLine(conn)
 	if err != nil {
 		return err
 	}
 	hreq.Buffer = append(hreq.Buffer, lineBytes...)
 	headerSplit := bytes.SplitN(hreq.Buffer, WhitespaceBytes, 3)
+	hreq.Buffer = append(hreq.Buffer, HttpHeaderLineSeparatorBytes...)
 	hreq.Method = string(headerSplit[0])
 	hreq.Path = string(headerSplit[1])
 	hreq.Protocol = string(headerSplit[2])
-	hreq.Protocol = hreq.Protocol[:len(hreq.Protocol)-HttpHeaderLineSeparatorLen]
 	for {
 		lineBytes, err = readHeaderLine(conn)
 		if err != nil {
-			break
+			return err
 		}
-		hreq.Buffer = append(hreq.Buffer, lineBytes...)
 		headerSplit = bytes.SplitN(lineBytes, HeaderSplitBytes, 2)
-
-		// TODO: Investigate
+		hreq.Buffer = append(hreq.Buffer, lineBytes...)
+		hreq.Buffer = append(hreq.Buffer, HttpHeaderLineSeparatorBytes...)
 		if len(headerSplit) <= 1 {
 			break
 		}
-		hreq.Headers[string(headerSplit[0])] = string(headerSplit[1])[:len(headerSplit[1])-HttpHeaderLineSeparatorLen]
+		hreq.Headers[string(headerSplit[0])] = string(headerSplit[1])
 	}
-	return nil
+	return err
 }
+
 func (hreq *HttpRequestHeader) Write(conn net.Conn) {
 	if hreq.Buffer != nil {
 		conn.Write(hreq.Buffer)
-		return
+	} else {
+		conn.Write([]byte(hreq.Method + Whitespace + hreq.Path + Whitespace + hreq.Protocol + HttpHeaderLineSeparator))
+		for k, v := range hreq.Headers {
+			conn.Write([]byte(k + HeaderSplit + v + HttpHeaderLineSeparator))
+		}
+		conn.Write([]byte(HttpHeaderLineSeparator))
 	}
-	conn.Write([]byte(hreq.Method + Whitespace + hreq.Path + Whitespace + hreq.Protocol + HttpHeaderLineSeparator))
-	for k, v := range hreq.Headers {
-		conn.Write([]byte(k + HeaderSplit + v + HttpHeaderLineSeparator))
-	}
-	conn.Write([]byte(HttpHeaderLineSeparator))
 }
 
 // func (hreq *HttpRequestHeader) ReadPartial(conn net.Conn, initialBuffer []byte) error {
