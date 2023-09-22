@@ -211,7 +211,7 @@ func (fp *ForwardProxy) handleForward(request *headers.HttpRequestHeader, conn n
 	} else {
 		err = session.Forward(request, conn)
 		if err != nil {
-			fp.Logger.Println(err.Error())
+			fp.Logger.Println("/FORWARD", sessionKey, err.Error())
 		} else {
 			fp.Logger.Println("/FORWARD", sessionKey, request.Method, request.Path, request.Protocol)
 		}
