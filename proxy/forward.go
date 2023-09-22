@@ -108,18 +108,18 @@ func (fp *ForwardProxy) Start() error {
 	if err != nil {
 		return err
 	}
-	defer Ln.Close()
 
 	fp.Ln = Ln
 	fp.sessions = make(map[string]*Session)
 	fp.requestHandlers = map[string]interface{}{
-		headers.RP_REQUEST_CREATE: fp.handleCreate,
-		headers.RP_REQUEST_JOIN:   fp.handleJoin,
-		headers.RP_REQUEST_DELETE: fp.handleDelete,
+		headers.RpRequestCreate: fp.handleCreate,
+		headers.RpRequestJoin:   fp.handleJoin,
+		headers.RpRequestDelete: fp.handleDelete,
 	}
 	fp.quitch = make(chan error)
 
 	// Start listener
+	defer Ln.Close()
 	go fp.Listen()
 
 	// Wait for the process to complete
@@ -140,7 +140,7 @@ func (fp *ForwardProxy) Listen() {
 func (fp *ForwardProxy) handleCreate(request *headers.ProxyHeader, conn net.Conn) {
 	sessionKey := createSesssionKey([]byte(request.Key))
 	responseHeader := headers.ProxyHeader{
-		Code: headers.FP_STATUS_SUCCESS,
+		Code: headers.FpStatusSuccess,
 		Key:  sessionKey,
 	}
 	responseHeader.Write(conn)
@@ -156,7 +156,7 @@ func (fp *ForwardProxy) handleCreate(request *headers.ProxyHeader, conn net.Conn
 func (fp *ForwardProxy) handleJoin(request *headers.ProxyHeader, conn net.Conn) {
 	if fp.sessions[request.Key].connected >= MAX_CONNECTION_POOL_SIZE {
 		response := &headers.ProxyHeader{
-			Code: headers.FP_STATUS_MAX_CONNECTIONS_LIMIT_REACHED,
+			Code: headers.FpStatusMaxConnectionsLimitReached,
 			Key:  request.Key,
 		}
 		_, err := response.Write(conn)
@@ -168,7 +168,7 @@ func (fp *ForwardProxy) handleJoin(request *headers.ProxyHeader, conn net.Conn) 
 	} else {
 		// request.Message represents connection id
 		response := &headers.ProxyHeader{
-			Code: headers.FP_STATUS_SUCCESS,
+			Code: headers.FpStatusSuccess,
 			Key:  request.Key,
 		}
 		_, err := response.Write(conn)

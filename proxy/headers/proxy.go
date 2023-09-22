@@ -14,25 +14,25 @@ import (
 // MESSAGE : 6 bytes
 // HEADER_LENGHT : 50 bytes
 
-const API_KEY_LEN int = 43
-const STATUS_CODE_LEN int = 1
-const SESSION_KEY_LEN int = 43
-const MESSAGE_LEN int = 6
-const STATUS_HEADER_LEN int = STATUS_CODE_LEN + SESSION_KEY_LEN + MESSAGE_LEN
+const ApiKeyLen int = 43
+const StatusCodeLen int = 1
+const SessionKeyLen int = 43
+const MessageLen int = 6
+const StatusHeaderLen int = StatusCodeLen + SessionKeyLen + MessageLen
 
 // Forward proxy header helpers
-const FP_STATUS_SUCCESS string = "0"
-const FP_STATUS_AUTH_ERROR string = "1"
-const FP_STATUS_MAX_CONNECTIONS_LIMIT_REACHED string = "2"
+const FpStatusSuccess string = "0"
+const FpStatusAuthError string = "1"
+const FpStatusMaxConnectionsLimitReached string = "2"
 
-const RP_REQUEST_CREATE string = "0"
-const RP_REQUEST_JOIN string = "1"
-const RP_REQUEST_DELETE string = "2"
+const RpRequestCreate string = "0"
+const RpRequestJoin string = "1"
+const RpRequestDelete string = "2"
 
 var RP_REQUESTS []string = []string{
-	RP_REQUEST_CREATE,
-	RP_REQUEST_JOIN,
-	RP_REQUEST_DELETE,
+	RpRequestCreate,
+	RpRequestJoin,
+	RpRequestDelete,
 }
 
 type ProxyHeader struct {
@@ -46,35 +46,35 @@ func (ph *ProxyHeader) Build() []byte {
 	header += ph.Code
 	header += ph.Key
 	header += ph.Message
-	if len(header) < STATUS_HEADER_LEN {
-		header += string(make([]byte, STATUS_HEADER_LEN-len(header)))
+	if len(header) < StatusHeaderLen {
+		header += string(make([]byte, StatusHeaderLen-len(header)))
 	}
 	return []byte(header)
 }
 
-func (ph *ProxyHeader) Parse(header [STATUS_HEADER_LEN]byte) {
+func (ph *ProxyHeader) Parse(header [StatusHeaderLen]byte) {
 	ph.Code = string(header[0])
-	ph.Key = string(header[STATUS_CODE_LEN : STATUS_CODE_LEN+SESSION_KEY_LEN])
-	ph.Message = string(header[STATUS_CODE_LEN+SESSION_KEY_LEN:])
+	ph.Key = string(header[StatusCodeLen : StatusCodeLen+SessionKeyLen])
+	ph.Message = string(header[StatusCodeLen+SessionKeyLen:])
 }
 
 func (ph *ProxyHeader) Read(conn net.Conn) error {
-	headerBytes := make([]byte, STATUS_HEADER_LEN)
+	headerBytes := make([]byte, StatusHeaderLen)
 	_, err := conn.Read(headerBytes)
 	if err != nil {
 		return err
 	}
-	ph.Parse([STATUS_HEADER_LEN]byte(headerBytes))
+	ph.Parse([StatusHeaderLen]byte(headerBytes))
 	return nil
 }
 
 func (ph *ProxyHeader) ReadPartial(conn net.Conn, initialBuffer []byte) error {
-	headerBytes := make([]byte, STATUS_HEADER_LEN-len(initialBuffer))
+	headerBytes := make([]byte, StatusHeaderLen-len(initialBuffer))
 	_, err := conn.Read(headerBytes)
 	if err != nil {
 		return err
 	}
-	ph.Parse([STATUS_HEADER_LEN]byte(append(initialBuffer, headerBytes...)))
+	ph.Parse([StatusHeaderLen]byte(append(initialBuffer, headerBytes...)))
 	return nil
 }
 

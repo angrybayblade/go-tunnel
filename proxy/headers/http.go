@@ -129,7 +129,7 @@ func (hreq *HttpRequestHeader) Write(conn net.Conn) {
 // 	return []byte(header)
 // }
 
-// func (hres *HttpResponseHeader) Parse(header [STATUS_HEADER_LEN]byte) {
+// func (hres *HttpResponseHeader) Parse(header []byte) {
 
 // }
 

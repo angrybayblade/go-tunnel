@@ -7,13 +7,13 @@ import (
 	"strings"
 )
 
-const API_KEY_LEN int = 43
+const ApiKeyLen int = 43
 const MAX_CONNECTION_POOL_SIZE int = 5
 
 func createSesssionKey(key []byte) string {
 	s := sha256.New()
 	s.Write(key)
-	return strings.ToLower(base64.URLEncoding.EncodeToString(s.Sum(nil))[:API_KEY_LEN])
+	return strings.ToLower(base64.URLEncoding.EncodeToString(s.Sum(nil))[:ApiKeyLen])
 }
 
 type Addr struct {
