@@ -130,19 +130,7 @@ func (rp *ReverseProxy) Pump(proxyDial net.Conn, initByte []byte, id int) {
 	localDial, err := net.Dial("tcp", rp.Addr.ToString())
 	if err != nil {
 		rp.Logger.Println("Error connecting to local server:", err)
-		response := [][]byte{
-			[]byte("HTTP/1.1 200 OK\r\n"),
-			[]byte("Date: Thu, 14 Sep 2023 12:28:53 GMT\r\n"),
-			[]byte("Server: Go-Tunnel/0.1.0 (Ubuntu)\r\n"),
-			[]byte("Content-Length: 47\r\n"),
-			[]byte("Content-Type: text/html\r\n"),
-			[]byte("Connection: Closed\r\n"),
-			[]byte("\r\n"),
-			[]byte("{\"error\": \"Cannot connect to the local adress\"}"),
-		}
-		for _, l := range response {
-			proxyDial.Write(l)
-		}
+		headers.HttpResponseCannotConnectToLocalserver.Write(proxyDial)
 		proxyDial.Close()
 		return
 	}
