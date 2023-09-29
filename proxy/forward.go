@@ -62,23 +62,10 @@ func (s *Session) Join(id string, conn net.Conn) {
 func (s *Session) Forward(requestHeader *headers.HttpRequestHeader, rquestConn net.Conn) error {
 	var err error
 	if s.connected <= 0 {
-		// TODO: Extract to method
 		defer rquestConn.Close()
-		response := [][]byte{
-			[]byte("HTTP/1.1 200 OK\r\n"),
-			[]byte("Date: Thu, 14 Sep 2023 12:28:53 GMT\r\n"),
-			[]byte("Server: Go-Tunnel/0.1.0 (Ubuntu)\r\n"),
-			[]byte("Content-Length: 53\r\n"),
-			[]byte("Content-Type: text/html\r\n"),
-			[]byte("Connection: Closed\r\n"),
-			[]byte("\r\n"),
-			[]byte("{\"error\": \"No free connection available in the pool\"}"),
-		}
-		for _, l := range response {
-			_, err = rquestConn.Write(l)
-			if err != nil {
-				return fmt.Errorf("Request forward fail, no free connections available; Error writing response: %v", err)
-			}
+		_, err = headers.HttpResponseNoFreeConnection.Write(rquestConn)
+		if err != nil {
+			return fmt.Errorf("Request forward fail, no free connections available; Error writing response: %v", err)
 		}
 		return ErrForwardFailedNoFreeConnection
 	}
@@ -130,7 +117,7 @@ func (fp *ForwardProxy) Listen() {
 	for {
 		conn, err := fp.Ln.Accept()
 		if err != nil {
-			// fp.Logger.Printf("Erorr accepting the connection")
+			fp.Logger.Println("Erorr accepting the connection:", err.Error())
 			continue
 		}
 		go fp.Handle(conn)
@@ -189,25 +176,13 @@ func (fp *ForwardProxy) handleForward(request *headers.HttpRequestHeader, conn n
 	sessionKey := strings.Split(request.Headers["Host"], ".")[0]
 	session := fp.sessions[sessionKey]
 	if session == nil {
-		response := [][]byte{
-			[]byte("HTTP/2 200 OK\r\n"),
-			[]byte("Date: Thu, 14 Sep 2023 12:28:53 GMT\r\n"),
-			[]byte("Server: Go-Tunnel/0.1.0 (Ubuntu)\r\n"),
-			[]byte("Content-Length: 53\r\n"),
-			[]byte("Content-Type: text/html\r\n"),
-			[]byte("Connection: Closed\r\n"),
-			[]byte("\r\n"),
-			[]byte("{\"error\": \"No connection available in the pool\"}"),
+		defer conn.Close()
+		_, err = headers.HttpResponseNoSessionFound.Write(conn)
+		if err != nil {
+			fp.Logger.Println("/FORWARD", sessionKey, "-> No session found; Error writing response: ", err.Error())
+		} else {
+			fp.Logger.Println("/FORWARD", sessionKey, "-> No session found")
 		}
-		for _, l := range response {
-			_, err = conn.Write(l)
-			if err != nil {
-				fp.Logger.Println("Error writing response ... :", err.Error())
-				break
-			}
-		}
-		conn.Close()
-		fp.Logger.Println("/FORWARD", sessionKey, "-> No session found")
 	} else {
 		err = session.Forward(request, conn)
 		if err != nil {
