@@ -3,6 +3,7 @@ package headers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -81,12 +82,18 @@ func (hreq *HttpRequestHeader) Read(conn net.Conn) error {
 	if err != nil {
 		return err
 	}
+
 	hreq.Buffer = append(hreq.Buffer, lineBytes...)
 	headerSplit := bytes.SplitN(hreq.Buffer, WhitespaceBytes, 3)
+	if len(headerSplit) < 3 {
+		return fmt.Errorf("%v; "+string(hreq.Buffer), InvalidHeaderStart)
+	}
+
 	hreq.Buffer = append(hreq.Buffer, HttpHeaderLineSeparatorBytes...)
 	hreq.Method = string(headerSplit[0])
 	hreq.Path = string(headerSplit[1])
 	hreq.Protocol = string(headerSplit[2])
+
 	for {
 		lineBytes, err = readHeaderLine(conn)
 		if err != nil {
