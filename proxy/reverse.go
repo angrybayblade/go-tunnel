@@ -66,7 +66,6 @@ func (rp *ReverseProxy) Connect() error {
 		rp.connections <- id
 	}
 	return nil
-
 }
 
 func (rp *ReverseProxy) Listen() {
@@ -76,7 +75,6 @@ func (rp *ReverseProxy) Listen() {
 	var ticker *time.Ticker = time.NewTicker(3 * time.Second)
 
 	fmt.Println("Starting reverse proxy @", "http://"+rp.sessionKey+"."+rp.Proxy)
-
 	for {
 		id = <-rp.connections
 		for {
@@ -158,11 +156,27 @@ func (rp *ReverseProxy) Pump(proxyDial net.Conn, initByte []byte, id int) {
 	rp.connections <- id
 }
 
+func (rp *ReverseProxy) Disconnect() {
+	rp.Logger.Println("Disconnecting...")
+	conn, err := net.Dial("tcp", rp.ProxyURI())
+	if err != nil {
+		// The proxy is not running
+		return
+	}
+	deleteSessionRequest := &headers.ProxyHeader{
+		Code: headers.RpRequestDelete,
+		Key:  rp.sessionKey,
+	}
+	deleteSessionRequest.Write(conn)
+}
+
 func Forward(cCtx *cli.Context) error {
 	var port int = cCtx.Int("port")
 	var host string = cCtx.String("host")
 	var key string = cCtx.String("key")
 	var Proxy string = cCtx.String("proxy")
+
+	quitCh := make(chan error)
 	proxy := &ReverseProxy{
 		Addr: Addr{
 			host: host,
@@ -178,6 +192,14 @@ func Forward(cCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+
 	go proxy.Listen()
-	return <-proxy.Quitch
+	go waitForTerminationSignal(quitCh)
+	go func(waitChannel chan error, quitChannel chan error) {
+		quitCh <- <-quitChannel
+	}(quitCh, proxy.Quitch)
+
+	err = <-quitCh
+	proxy.Disconnect()
+	return err
 }

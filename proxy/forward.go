@@ -44,10 +44,12 @@ func (c *Connection) Forward(requestHeader *headers.HttpRequestHeader, requestCo
 }
 
 type Session struct {
+	key         string
 	connections map[string]*Connection
 	free        []string
 	inUse       []string
 	connected   int
+	logger      *log.Logger
 }
 
 func (s *Session) Join(id string, conn net.Conn) {
@@ -57,6 +59,13 @@ func (s *Session) Join(id string, conn net.Conn) {
 	}
 	s.free = append(s.free, id)
 	s.connected += 1
+}
+
+func (s *Session) Disconnect() {
+	for id, connection := range s.connections {
+		s.logger.Println("/DELETE", s.key, "-> Connection ID:", id)
+		connection.conn.Close()
+	}
 }
 
 func (s *Session) Forward(requestHeader *headers.HttpRequestHeader, rquestConn net.Conn) error {
@@ -83,12 +92,13 @@ type ForwardProxy struct {
 	Addr            Addr
 	Logger          *log.Logger
 	Ln              net.Listener
-	quitch          chan error
+	Quitch          chan error
 	sessions        map[string]*Session
 	requestHandlers map[string]interface{}
+	running         bool
 }
 
-func (fp *ForwardProxy) Start() error {
+func (fp *ForwardProxy) Setup() error {
 	Ln, err := net.Listen(
 		"tcp", fp.Addr.ToString(),
 	)
@@ -97,26 +107,24 @@ func (fp *ForwardProxy) Start() error {
 	}
 
 	fp.Ln = Ln
+	fp.Quitch = make(chan error)
 	fp.sessions = make(map[string]*Session)
 	fp.requestHandlers = map[string]interface{}{
 		headers.RpRequestCreate: fp.handleCreate,
 		headers.RpRequestJoin:   fp.handleJoin,
 		headers.RpRequestDelete: fp.handleDelete,
 	}
-	fp.quitch = make(chan error)
-
-	// Start listener
-	defer Ln.Close()
-	go fp.Listen()
-
-	// Wait for the process to complete
-	return <-fp.quitch
+	fp.running = true
+	return nil
 }
 
 func (fp *ForwardProxy) Listen() {
-	for {
+	for fp.running {
 		conn, err := fp.Ln.Accept()
 		if err != nil {
+			if !fp.running {
+				break
+			}
 			fp.Logger.Println("Erorr accepting the connection:", err.Error())
 			continue
 		}
@@ -132,9 +140,11 @@ func (fp *ForwardProxy) handleCreate(request *headers.ProxyHeader, conn net.Conn
 	}
 	responseHeader.Write(conn)
 	fp.sessions[sessionKey] = &Session{
+		key:         sessionKey,
 		connections: make(map[string]*Connection, 5),
 		free:        make([]string, 0),
 		inUse:       make([]string, 0),
+		logger:      fp.Logger,
 	}
 	conn.Close()
 	fp.Logger.Println("/CREATE", sessionKey)
@@ -169,6 +179,9 @@ func (fp *ForwardProxy) handleJoin(request *headers.ProxyHeader, conn net.Conn) 
 }
 
 func (fp *ForwardProxy) handleDelete(request *headers.ProxyHeader, conn net.Conn) {
+	fp.sessions[request.Key].Disconnect()
+	delete(fp.sessions, request.Key)
+	fp.Logger.Println("/DELETE", request.Key)
 }
 
 func (fp *ForwardProxy) handleForward(request *headers.HttpRequestHeader, conn net.Conn) {
@@ -219,6 +232,12 @@ func (fp *ForwardProxy) Handle(conn net.Conn) {
 }
 
 func (fp *ForwardProxy) Stop() {
+	fp.running = false
+	for key, session := range fp.sessions {
+		session.Disconnect()
+		fp.Logger.Println("/DELETE", key)
+	}
+	fp.Logger.Println("Stopping the listener...")
 	fp.Ln.Close()
 }
 
@@ -226,8 +245,9 @@ func Listen(cCtx *cli.Context) error {
 	var port int = cCtx.Int("port")
 	var host string = cCtx.String("host")
 
+	quitCh := make(chan error)
 	fmt.Printf("Starting listener @ %s:%d\n", host, port)
-	listener := &ForwardProxy{
+	proxy := &ForwardProxy{
 		Addr: Addr{
 			host: host,
 			port: port,
@@ -236,6 +256,19 @@ func Listen(cCtx *cli.Context) error {
 			os.Stdout, "FP: ", log.Ltime,
 		),
 	}
-	err := listener.Start()
+
+	err := proxy.Setup()
+	if err != nil {
+		return err
+	}
+
+	go proxy.Listen()
+	go waitForTerminationSignal(quitCh)
+	go func(waitChannel chan error, quitChannel chan error) {
+		quitCh <- <-quitChannel
+	}(quitCh, proxy.Quitch)
+
+	err = <-quitCh
+	proxy.Stop()
 	return err
 }
