@@ -5,11 +5,12 @@ import (
 )
 
 // Proxy header
-// _______________________________________
-// | STATUS_CODE | SESSION_KEY | MESSAGE |
-// ---------------------------------------
+// ______________________________________________________
+// | STATUS_CODE / REQUEST_CODE | SESSION_KEY | MESSAGE |
+// ------------------------------------------------------
 //
 // STATUS_CODE : 1 byte
+// REQUEST_CODE : 1 byte
 // SESSION_KEY : 43 bytes
 // MESSAGE : 6 bytes
 // HEADER_LENGHT : 50 bytes
