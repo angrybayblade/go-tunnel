@@ -4,5 +4,5 @@ import (
 	"errors"
 )
 
-var IncompleteHeaderLine = errors.New("Could not read the header line")
-var InvalidHeaderStart = errors.New("Invalid header start")
+var ErrIncompleteHeaderLine = errors.New("Could not read the header line")
+var ErrInvalidHeaderStart = errors.New("Invalid header start")
