@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"os"
 
 	"github.com/angrybayblade/tunnel/proxy"
@@ -60,6 +60,9 @@ func main() {
 		},
 	}
 	if err := app.Run(os.Args); err != nil {
-		log.Fatal(err)
+		if err != proxy.ErrSigterm {
+			fmt.Println(err)
+		}
+		os.Exit(1)
 	}
 }
