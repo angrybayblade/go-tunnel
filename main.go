@@ -28,6 +28,10 @@ func main() {
 						Value: "127.0.0.1",
 						Usage: "Host to serve",
 					},
+					&cli.StringFlag{
+						Name:  "log",
+						Usage: "Logfile",
+					},
 				},
 			},
 			{
@@ -54,6 +58,10 @@ func main() {
 						Name:  "proxy",
 						Value: "localhost:3000",
 						Usage: "URI for proxy server",
+					},
+					&cli.StringFlag{
+						Name:  "log",
+						Usage: "Logfile",
 					},
 				},
 			},

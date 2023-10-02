@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -176,19 +175,22 @@ func Forward(cCtx *cli.Context) error {
 	var key string = cCtx.String("key")
 	var Proxy string = cCtx.String("proxy")
 
+	logger, err := getLogger("RP", cCtx.String("log"))
+	if err != nil {
+		return err
+	}
+
 	quitCh := make(chan error)
 	proxy := &ReverseProxy{
 		Addr: Addr{
 			host: host,
 			port: port,
 		},
-		key:   key,
-		Proxy: Proxy,
-		Logger: log.New(
-			os.Stdout, "RP: ", log.Ltime,
-		),
+		key:    key,
+		Proxy:  Proxy,
+		Logger: logger,
 	}
-	err := proxy.Connect()
+	err = proxy.Connect()
 	if err != nil {
 		return err
 	}

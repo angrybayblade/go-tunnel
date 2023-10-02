@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"strings"
 
 	"github.com/angrybayblade/tunnel/proxy/headers"
@@ -245,6 +244,11 @@ func Listen(cCtx *cli.Context) error {
 	var port int = cCtx.Int("port")
 	var host string = cCtx.String("host")
 
+	logger, err := getLogger("FP", cCtx.String("log"))
+	if err != nil {
+		return err
+	}
+
 	quitCh := make(chan error)
 	fmt.Printf("Starting listener @ %s:%d\n", host, port)
 	proxy := &ForwardProxy{
@@ -252,12 +256,10 @@ func Listen(cCtx *cli.Context) error {
 			host: host,
 			port: port,
 		},
-		Logger: log.New(
-			os.Stdout, "FP: ", log.Ltime,
-		),
+		Logger: logger,
 	}
 
-	err := proxy.Setup()
+	err = proxy.Setup()
 	if err != nil {
 		return err
 	}
