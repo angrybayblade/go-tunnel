@@ -34,7 +34,7 @@ func readHeaderLine(conn net.Conn) ([]byte, error) {
 	for {
 		n, err := conn.Read(rBuffer)
 		if err != nil {
-			return lineBytes, IncompleteHeaderLine
+			return lineBytes, ErrIncompleteHeaderLine
 		}
 		lineBytes = append(lineBytes, rBuffer...)
 		readSize += n
@@ -86,7 +86,7 @@ func (hreq *HttpRequestHeader) Read(conn net.Conn) error {
 	hreq.Buffer = append(hreq.Buffer, lineBytes...)
 	headerSplit := bytes.SplitN(hreq.Buffer, WhitespaceBytes, 3)
 	if len(headerSplit) < 3 {
-		return fmt.Errorf("%v; "+string(hreq.Buffer), InvalidHeaderStart)
+		return fmt.Errorf("%v; "+string(hreq.Buffer), ErrInvalidHeaderStart)
 	}
 
 	hreq.Buffer = append(hreq.Buffer, HttpHeaderLineSeparatorBytes...)
