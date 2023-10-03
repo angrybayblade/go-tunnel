@@ -115,15 +115,15 @@ func (rp *ReverseProxy) Listen() {
 			}
 
 			// Wait until we get request
-			initByte := make([]byte, 1)
-			proxyDial.Read(initByte)
-			go rp.Pump(proxyDial, initByte, id)
+			pumpBytes := make([]byte, 1)
+			proxyDial.Read(pumpBytes)
+			go rp.Pump(proxyDial, pumpBytes, id)
 			break
 		}
 	}
 }
 
-func (rp *ReverseProxy) Pump(proxyDial net.Conn, initByte []byte, id int) {
+func (rp *ReverseProxy) Pump(proxyDial net.Conn, pumpBytes []byte, id int) {
 	localDial, err := net.Dial("tcp", rp.Addr.ToString())
 	if err != nil {
 		rp.Logger.Println("Error connecting to local server:", err)
@@ -131,18 +131,31 @@ func (rp *ReverseProxy) Pump(proxyDial net.Conn, initByte []byte, id int) {
 		proxyDial.Close()
 		return
 	}
-	pumpBytes := make([]byte, 1024)
-	localDial.Write(initByte)
-	for {
-		n, err := proxyDial.Read(pumpBytes)
+
+	requestHeader := headers.HttpRequestHeader{
+		Buffer: pumpBytes,
+	}
+	requestHeader.Read(proxyDial)
+	localDial.Write(requestHeader.Buffer)
+	if requestHeader.Headers["Content-Size"] != "" {
+		contentSize, err := strconv.Atoi(requestHeader.Headers["Content-Size"])
 		if err != nil {
-			break
-		}
-		localDial.Write(pumpBytes[:n])
-		if string(pumpBytes[n-4:n]) == headers.HttpHeaderSeparator {
-			break
+			rp.Logger.Println("/FORWARD Conection ID:", id, "->", "Error reading request payload")
+		} else {
+			pumpBytes = make([]byte, contentSize)
+			for {
+				n, err := proxyDial.Read(pumpBytes)
+				if err != nil {
+					break
+				}
+				localDial.Write(pumpBytes[:n])
+				if string(pumpBytes[n-4:n]) == headers.HttpHeaderSeparator {
+					break
+				}
+			}
 		}
 	}
+
 	for {
 		n, err := localDial.Read(pumpBytes)
 		if err != nil {
@@ -153,6 +166,7 @@ func (rp *ReverseProxy) Pump(proxyDial net.Conn, initByte []byte, id int) {
 	localDial.Close()
 	proxyDial.Close()
 	rp.connections <- id
+	rp.Logger.Println("/FORWARD Connection:", id, "->", requestHeader.Path, requestHeader.Method, requestHeader.Protocol)
 }
 
 func (rp *ReverseProxy) Disconnect() {

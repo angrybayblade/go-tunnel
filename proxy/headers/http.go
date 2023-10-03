@@ -27,7 +27,7 @@ var HeaderSplit string = ": "
 
 var DefaultHttpProtocolVersion string = "HTTP/1.1"
 
-func readHeaderLine(conn net.Conn) ([]byte, error) {
+func ReadHeaderLine(conn net.Conn) ([]byte, error) {
 	var readSize int = 0
 	rBuffer := make([]byte, 1)
 	lineBytes := make([]byte, 0)
@@ -78,7 +78,7 @@ func (hreq *HttpRequestHeader) Read(conn net.Conn) error {
 		hreq.Buffer = make([]byte, 0)
 	}
 
-	lineBytes, err = readHeaderLine(conn)
+	lineBytes, err = ReadHeaderLine(conn)
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,7 @@ func (hreq *HttpRequestHeader) Read(conn net.Conn) error {
 	hreq.Protocol = string(headerSplit[2])
 
 	for {
-		lineBytes, err = readHeaderLine(conn)
+		lineBytes, err = ReadHeaderLine(conn)
 		if err != nil {
 			return err
 		}
@@ -137,6 +137,13 @@ func (hres *HttpResponseHeader) SetData(data []byte) {
 	hres.Headers["Content-Type"] = "application/octet"
 }
 
+func (hres *HttpResponseHeader) SetJson(data map[string]string) {
+	// TODO: Add error handling
+	hres.Data, _ = json.Marshal(data)
+	hres.Headers["Content-Length"] = strconv.Itoa(len(hres.Data))
+	hres.Headers["Content-Type"] = "application/json"
+}
+
 func (hres *HttpResponseHeader) Build() {
 	var response string
 	response = hres.Protocol + Whitespace + strconv.Itoa(hres.StatusCode) + Whitespace + hres.StatusMessage + HttpHeaderLineSeparator
@@ -148,13 +155,6 @@ func (hres *HttpResponseHeader) Build() {
 	if hres.Data != nil {
 		hres.Buffer = append(hres.Buffer, hres.Data...)
 	}
-}
-
-func (hres *HttpResponseHeader) SetJson(data map[string]string) {
-	// TODO: Add error handling
-	hres.Data, _ = json.Marshal(data)
-	hres.Headers["Content-Length"] = strconv.Itoa(len(hres.Data))
-	hres.Headers["Content-Type"] = "application/json"
 }
 
 func (hres *HttpResponseHeader) Write(conn net.Conn) (int, error) {
