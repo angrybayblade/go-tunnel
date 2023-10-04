@@ -15,7 +15,6 @@ import (
 // MESSAGE : 6 bytes
 // HEADER_LENGHT : 50 bytes
 
-const ApiKeyLen int = 43
 const StatusCodeLen int = 1
 const SessionKeyLen int = 43
 const MessageLen int = 6
@@ -24,17 +23,16 @@ const StatusHeaderLen int = StatusCodeLen + SessionKeyLen + MessageLen
 // Forward proxy header helpers
 const FpStatusSuccess string = "0"
 const FpStatusAuthError string = "1"
-const FpStatusMaxConnectionsLimitReached string = "2"
+const FpStatusErrorNotInUimaMode string = "2"
+const FpStatusMaxConnectionsLimitReached string = "3"
+
+// TOFIX: Introduce new header format
+const FpRequestGenerateKey string = "3"
+const FpRequestRevokeKey string = "4"
 
 const RpRequestCreate string = "0"
 const RpRequestJoin string = "1"
 const RpRequestDelete string = "2"
-
-var RP_REQUESTS []string = []string{
-	RpRequestCreate,
-	RpRequestJoin,
-	RpRequestDelete,
-}
 
 type ProxyHeader struct {
 	Code    string
