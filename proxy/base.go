@@ -5,15 +5,16 @@ import (
 	"encoding/base64"
 	"strconv"
 	"strings"
+
+	"github.com/angrybayblade/tunnel/auth"
 )
 
-const ApiKeyLen int = 43
 const MAX_CONNECTION_POOL_SIZE int = 5
 
 func createSesssionKey(key []byte) string {
 	s := sha256.New()
 	s.Write(key)
-	return strings.ToLower(base64.URLEncoding.EncodeToString(s.Sum(nil))[:ApiKeyLen])
+	return strings.ToLower(base64.URLEncoding.EncodeToString(s.Sum(nil))[:auth.KeyLen])
 }
 
 type Addr struct {
