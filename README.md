@@ -8,7 +8,7 @@
 
 * FP : Forward proxy
 * RP : Reverse proxy
-* LTS : Local HTTP server
+* LHS : Local HTTP server
 
 Request cycle
 
@@ -17,7 +17,7 @@ UserClient --request-> FP --forward->  RP
                                        ↓
                                     forward
                                        ↓
-                                      LTS      
+                                      LHS      
                                        ↓
                                     response
                                        ↓
