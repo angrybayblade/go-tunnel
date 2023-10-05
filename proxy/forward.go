@@ -136,7 +136,7 @@ func (fp *ForwardProxy) Setup() error {
 			Store:   make(map[string]int),
 		}
 		pk, _ := kp.DumpPublicKey()
-		file := os.Getenv("TUNNEL_PUBLIC_KEY_FILE")
+		file := os.Getenv("PROXY_PUBLIC_KEY_FILE")
 		if file == "" {
 			file = "key.pub"
 		}
