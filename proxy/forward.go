@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/angrybayblade/tunnel/auth"
 	"github.com/angrybayblade/tunnel/proxy/headers"
@@ -101,6 +102,7 @@ type ForwardProxy struct {
 	requestHandlers map[string]interface{}
 	running         bool
 	auth            *auth.InMemory
+	mut             *sync.Mutex
 }
 
 func (fp *ForwardProxy) Setup() error {
@@ -122,6 +124,7 @@ func (fp *ForwardProxy) Setup() error {
 		headers.FpRequestRevokeKey:   fp.handleRevokeKey,
 	}
 	fp.running = true
+	fp.mut = &sync.Mutex{}
 	if fp.Uima {
 		var kp *auth.KeyPair
 		kp, err = auth.GenerateKeyPair()
@@ -143,12 +146,19 @@ func (fp *ForwardProxy) Setup() error {
 	return nil
 }
 
+func (fp *ForwardProxy) Runing() bool {
+	fp.mut.Lock()
+	running := fp.running
+	fp.mut.Unlock()
+	return running
+}
+
 func (fp *ForwardProxy) Listen() {
-	for fp.running {
+	for fp.Runing() {
 		conn, err := fp.Ln.Accept()
 		if err != nil {
-			if !fp.running {
-				break
+			if !fp.Runing() {
+				return
 			}
 			fp.Logger.Println("Erorr accepting the connection:", err.Error())
 			continue
@@ -353,7 +363,10 @@ func (fp *ForwardProxy) Handle(conn net.Conn) {
 }
 
 func (fp *ForwardProxy) Stop() {
+	fp.mut.Lock()
 	fp.running = false
+	fp.mut.Unlock()
+
 	for key, session := range fp.sessions {
 		session.Disconnect()
 		fp.Logger.Println("/DELETE", key)
