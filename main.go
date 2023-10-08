@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"strconv"
 
@@ -42,11 +41,7 @@ func GenerateKey(cCtx *cli.Context) error {
 		return err
 	}
 
-	proxyDial, err := net.Dial("tcp", cCtx.String("proxy"))
-	if err != nil {
-		return err
-	}
-
+	proxyDial, _ := proxy.ConnectTo(cCtx.String("proxy"), true, 80)
 	request := &headers.ProxyHeader{
 		Code: headers.FpRequestGenerateKey,
 		Key:  string(requestEnc),
@@ -85,11 +80,7 @@ func RevokeKey(cCtx *cli.Context) error {
 	messageBytes := make([]byte, 2)
 	binary.LittleEndian.PutUint16(messageBytes, keyId)
 	requestEnc, err := kp.Encrypt(messageBytes[:1])
-	proxyDial, err := net.Dial("tcp", cCtx.String("proxy"))
-	if err != nil {
-		return err
-	}
-
+	proxyDial, _ := proxy.ConnectTo(cCtx.String("proxy"), true, 80)
 	request := &headers.ProxyHeader{
 		Code: headers.FpRequestRevokeKey,
 		Key:  string(requestEnc),
@@ -212,10 +203,12 @@ func main() {
 			},
 		},
 	}
-	if err := app.Run(os.Args); err != nil {
-		if err != proxy.ErrSigterm {
-			fmt.Println(err)
-		}
-		os.Exit(1)
+
+	err := app.Run(os.Args)
+	if err == nil || err == proxy.ErrSigterm {
+		return
 	}
+
+	fmt.Println(err)
+	os.Exit(1)
 }

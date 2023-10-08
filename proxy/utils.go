@@ -3,8 +3,11 @@ package proxy
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -27,4 +30,21 @@ func getLogger(name string, logFile string) (*log.Logger, error) {
 		logger.SetOutput(fp)
 	}
 	return logger, nil
+}
+
+func ConnectTo(addr string, exitOnErr bool, defaultPort int) (net.Conn, error) {
+	if defaultPort == 0 {
+		defaultPort = 80
+	}
+
+	if !strings.Contains(addr, ":") {
+		addr += ":" + strconv.Itoa(defaultPort)
+	}
+
+	conn, err := net.Dial("tcp", addr)
+	if exitOnErr && err != nil {
+		fmt.Println("Error connecting to", addr+";", err)
+		os.Exit(1)
+	}
+	return conn, err
 }
