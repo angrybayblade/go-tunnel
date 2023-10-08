@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/angrybayblade/tunnel/proxy/headers"
-	"github.com/urfave/cli/v2"
 )
 
 const DUMMY_KEY string = "0000000000000000000000000000000000000000000"
@@ -19,7 +18,7 @@ type ReverseProxy struct {
 	Addr        Addr
 	Logger      *log.Logger
 	Proxy       string
-	key         string
+	Key         string
 	Quitch      chan error
 	sessionKey  string
 	waitGroup   *sync.WaitGroup
@@ -41,7 +40,7 @@ func (rp *ReverseProxy) Connect() error {
 
 	createRequest := &headers.ProxyHeader{
 		Code: headers.RpRequestCreate,
-		Key:  rp.key,
+		Key:  rp.Key,
 	}
 	_, err = createRequest.Write(conn)
 	if err != nil {
@@ -60,8 +59,8 @@ func (rp *ReverseProxy) Connect() error {
 
 	rp.sessionKey = createResponse.Key
 	rp.Quitch = make(chan error)
-	rp.connections = make(chan int, MAX_CONNECTION_POOL_SIZE)
-	for id := 0; id < MAX_CONNECTION_POOL_SIZE; id++ {
+	rp.connections = make(chan int, MaxConnectionPoolSize)
+	for id := 0; id < MaxConnectionPoolSize; id++ {
 		rp.connections <- id
 	}
 	return nil
@@ -117,13 +116,13 @@ func (rp *ReverseProxy) Listen() {
 			// Wait until we get request
 			pumpBytes := make([]byte, 1)
 			proxyDial.Read(pumpBytes)
-			go rp.Pump(proxyDial, pumpBytes, id)
+			go rp.Forward(proxyDial, pumpBytes, id)
 			break
 		}
 	}
 }
 
-func (rp *ReverseProxy) Pump(proxyDial net.Conn, pumpBytes []byte, id int) {
+func (rp *ReverseProxy) Forward(proxyDial net.Conn, pumpBytes []byte, id int) {
 	localDial, err := net.Dial("tcp", rp.Addr.ToString())
 	if err != nil {
 		rp.Logger.Println("Error connecting to local server:", err)
@@ -181,41 +180,4 @@ func (rp *ReverseProxy) Disconnect() {
 		Key:  rp.sessionKey,
 	}
 	deleteSessionRequest.Write(conn)
-}
-
-func Forward(cCtx *cli.Context) error {
-	var port int = cCtx.Int("port")
-	var host string = cCtx.String("host")
-	var key string = cCtx.String("key")
-	var Proxy string = cCtx.String("proxy")
-
-	logger, err := getLogger("RP", cCtx.String("log"))
-	if err != nil {
-		return err
-	}
-
-	quitCh := make(chan error)
-	proxy := &ReverseProxy{
-		Addr: Addr{
-			host: host,
-			port: port,
-		},
-		key:    key,
-		Proxy:  Proxy,
-		Logger: logger,
-	}
-	err = proxy.Connect()
-	if err != nil {
-		return err
-	}
-
-	go proxy.Listen()
-	go waitForTerminationSignal(quitCh)
-	go func(waitChannel chan error, quitChannel chan error) {
-		quitCh <- <-quitChannel
-	}(quitCh, proxy.Quitch)
-
-	err = <-quitCh
-	proxy.Disconnect()
-	return err
 }

@@ -12,7 +12,6 @@ import (
 
 	"github.com/angrybayblade/tunnel/auth"
 	"github.com/angrybayblade/tunnel/proxy/headers"
-	"github.com/urfave/cli/v2"
 )
 
 type Connection struct {
@@ -126,8 +125,7 @@ func (fp *ForwardProxy) Setup() error {
 	fp.running = true
 	fp.mut = &sync.Mutex{}
 	if fp.Uima {
-		var kp *auth.KeyPair
-		kp, err = auth.GenerateKeyPair()
+		kp, err := auth.GenerateKeyPair()
 		if err != nil {
 			return err
 		}
@@ -176,7 +174,7 @@ func (fp *ForwardProxy) handleCreate(request *headers.ProxyHeader, conn net.Conn
 		responseHeader.Write(conn)
 		return
 	}
-	sessionKey := createSesssionKey([]byte(request.Key))
+	sessionKey := auth.Sha256([]byte(request.Key))
 	responseHeader := headers.ProxyHeader{
 		Code: headers.FpStatusSuccess,
 		Key:  sessionKey,
@@ -194,7 +192,7 @@ func (fp *ForwardProxy) handleCreate(request *headers.ProxyHeader, conn net.Conn
 }
 
 func (fp *ForwardProxy) handleJoin(request *headers.ProxyHeader, conn net.Conn) {
-	if fp.sessions[request.Key].connected >= MAX_CONNECTION_POOL_SIZE {
+	if fp.sessions[request.Key].connected >= MaxConnectionPoolSize {
 		response := &headers.ProxyHeader{
 			Code: headers.FpStatusMaxConnectionsLimitReached,
 			Key:  request.Key,
@@ -373,41 +371,4 @@ func (fp *ForwardProxy) Stop() {
 	}
 	fp.Logger.Println("Stopping the listener...")
 	fp.Ln.Close()
-}
-
-func Listen(cCtx *cli.Context) error {
-	var port int = cCtx.Int("port")
-	var host string = cCtx.String("host")
-	var uima bool = cCtx.Bool("uima") // Use in-memory authentication server
-
-	logger, err := getLogger("FP", cCtx.String("log"))
-	if err != nil {
-		return err
-	}
-
-	quitCh := make(chan error)
-	fmt.Printf("Starting listener @ %s:%d\n", host, port)
-	proxy := &ForwardProxy{
-		Addr: Addr{
-			host: host,
-			port: port,
-		},
-		Logger: logger,
-		Uima:   uima,
-	}
-
-	err = proxy.Setup()
-	if err != nil {
-		return err
-	}
-
-	go proxy.Listen()
-	go waitForTerminationSignal(quitCh)
-	go func(waitChannel chan error, quitChannel chan error) {
-		quitCh <- <-quitChannel
-	}(quitCh, proxy.Quitch)
-
-	err = <-quitCh
-	proxy.Stop()
-	return err
 }

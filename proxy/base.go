@@ -1,27 +1,16 @@
 package proxy
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"strconv"
-	"strings"
-
-	"github.com/angrybayblade/tunnel/auth"
 )
 
-const MAX_CONNECTION_POOL_SIZE int = 5
-
-func createSesssionKey(key []byte) string {
-	s := sha256.New()
-	s.Write(key)
-	return strings.ToLower(base64.URLEncoding.EncodeToString(s.Sum(nil))[:auth.KeyLen])
-}
+const MaxConnectionPoolSize int = 5
 
 type Addr struct {
-	host string
-	port int
+	Host string
+	Port int
 }
 
 func (a *Addr) ToString() string {
-	return a.host + ":" + strconv.Itoa(a.port)
+	return a.Host + ":" + strconv.Itoa(a.Port)
 }
