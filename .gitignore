@@ -1,3 +1,4 @@
 tunnel
 temp/
 *.log
+*.pub

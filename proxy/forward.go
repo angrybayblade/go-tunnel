@@ -1,11 +1,16 @@
 package proxy
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/angrybayblade/tunnel/auth"
 	"github.com/angrybayblade/tunnel/proxy/headers"
 	"github.com/urfave/cli/v2"
 )
@@ -92,9 +97,12 @@ type ForwardProxy struct {
 	Logger          *log.Logger
 	Ln              net.Listener
 	Quitch          chan error
+	Uima            bool
 	sessions        map[string]*Session
 	requestHandlers map[string]interface{}
 	running         bool
+	auth            *auth.InMemory
+	mut             *sync.Mutex
 }
 
 func (fp *ForwardProxy) Setup() error {
@@ -109,20 +117,48 @@ func (fp *ForwardProxy) Setup() error {
 	fp.Quitch = make(chan error)
 	fp.sessions = make(map[string]*Session)
 	fp.requestHandlers = map[string]interface{}{
-		headers.RpRequestCreate: fp.handleCreate,
-		headers.RpRequestJoin:   fp.handleJoin,
-		headers.RpRequestDelete: fp.handleDelete,
+		headers.RpRequestCreate:      fp.handleCreate,
+		headers.RpRequestJoin:        fp.handleJoin,
+		headers.RpRequestDelete:      fp.handleDelete,
+		headers.FpRequestGenerateKey: fp.handleGenerateKey,
+		headers.FpRequestRevokeKey:   fp.handleRevokeKey,
 	}
 	fp.running = true
+	fp.mut = &sync.Mutex{}
+	if fp.Uima {
+		var kp *auth.KeyPair
+		kp, err = auth.GenerateKeyPair()
+		if err != nil {
+			return err
+		}
+		fp.auth = &auth.InMemory{
+			KeyPair: kp,
+			Store:   make(map[string]int),
+		}
+		pk, _ := kp.DumpPublicKey()
+		file := os.Getenv("PROXY_PUBLIC_KEY_FILE")
+		if file == "" {
+			file = "key.pub"
+		}
+		os.WriteFile(file, pk, 0644)
+		fp.Logger.Println("Using in-memory authentication server; RSA public key for authentication is stored in", file)
+	}
 	return nil
 }
 
+func (fp *ForwardProxy) Runing() bool {
+	fp.mut.Lock()
+	running := fp.running
+	fp.mut.Unlock()
+	return running
+}
+
 func (fp *ForwardProxy) Listen() {
-	for fp.running {
+	for fp.Runing() {
 		conn, err := fp.Ln.Accept()
 		if err != nil {
-			if !fp.running {
-				break
+			if !fp.Runing() {
+				return
 			}
 			fp.Logger.Println("Erorr accepting the connection:", err.Error())
 			continue
@@ -132,6 +168,14 @@ func (fp *ForwardProxy) Listen() {
 }
 
 func (fp *ForwardProxy) handleCreate(request *headers.ProxyHeader, conn net.Conn) {
+	if !fp.auth.IsValidAuthToken(request.Key) {
+		responseHeader := headers.ProxyHeader{
+			Code: headers.FpStatusAuthError,
+			Key:  "",
+		}
+		responseHeader.Write(conn)
+		return
+	}
 	sessionKey := createSesssionKey([]byte(request.Key))
 	responseHeader := headers.ProxyHeader{
 		Code: headers.FpStatusSuccess,
@@ -183,6 +227,94 @@ func (fp *ForwardProxy) handleDelete(request *headers.ProxyHeader, conn net.Conn
 	fp.Logger.Println("/DELETE", request.Key)
 }
 
+func (fp *ForwardProxy) handleGenerateKey(request *headers.ProxyHeader, conn net.Conn) {
+	var response *headers.ProxyHeader
+	defer conn.Close()
+
+	if !fp.Uima {
+		fp.Logger.Printf("/GENERATE not in UIMA mode")
+		response = &headers.ProxyHeader{
+			Code: headers.FpStatusErrorNotInUimaMode,
+		}
+		response.Write(conn)
+		return
+	}
+
+	if !fp.auth.IsValidRequest([]byte(request.Key), headers.FpRequestGenerateKey) {
+		fp.Logger.Printf("/GENERATE Invalid signing key")
+		response = &headers.ProxyHeader{
+			Code: headers.FpStatusAuthError,
+		}
+		response.Write(conn)
+		return
+	}
+
+	// TOFIX: Increase header size to allow different communication type
+	if len(fp.auth.Store) > 255 {
+		fp.Logger.Printf("/GENERATE Max token limite reached")
+		response = &headers.ProxyHeader{
+			Code: headers.FpStatusMaxConnectionsLimitReached,
+		}
+		response.Write(conn)
+		return
+	}
+
+	response = &headers.ProxyHeader{
+		Code:    headers.FpStatusSuccess,
+		Key:     fp.auth.GenerateKey(),
+		Message: strconv.Itoa(fp.auth.Count),
+	}
+	response.Write(conn)
+	fp.Logger.Println("/GENERATE Generate key with index:", fp.auth.Count)
+}
+
+func (fp *ForwardProxy) handleRevokeKey(request *headers.ProxyHeader, conn net.Conn) {
+	var response *headers.ProxyHeader
+	defer conn.Close()
+
+	if !fp.Uima {
+		fp.Logger.Printf("/REVOKE not in UIMA mode")
+		response = &headers.ProxyHeader{
+			Code: headers.FpStatusErrorNotInUimaMode,
+		}
+		response.Write(conn)
+		return
+	}
+
+	keyIdbuf, err := fp.auth.KeyPair.Decrypt([]byte(request.Key))
+	if err != nil {
+		fp.Logger.Printf("/REVOKE Invalid signing key")
+		response = &headers.ProxyHeader{
+			Code: headers.FpStatusAuthError,
+		}
+		response.Write(conn)
+		return
+	}
+
+	keyIdbuf = append(keyIdbuf, 0)
+	keyId := int(binary.LittleEndian.Uint16(keyIdbuf))
+	keyToDelete := ""
+	for key, id := range fp.auth.Store {
+		if id == keyId {
+			keyToDelete = key
+			break
+		}
+	}
+
+	if keyToDelete != "" {
+		delete(fp.auth.Store, keyToDelete)
+		fp.Logger.Println("/REVOKE Revoked key with index:", keyId)
+	} else {
+		fp.Logger.Println("/REVOKE Key was not found:", keyId)
+	}
+
+	response = &headers.ProxyHeader{
+		Code: headers.FpStatusSuccess,
+		Key:  keyToDelete,
+	}
+	response.Write(conn)
+}
+
 func (fp *ForwardProxy) handleForward(request *headers.HttpRequestHeader, conn net.Conn) {
 	var err error
 	sessionKey := strings.Split(request.Headers["Host"], ".")[0]
@@ -231,7 +363,10 @@ func (fp *ForwardProxy) Handle(conn net.Conn) {
 }
 
 func (fp *ForwardProxy) Stop() {
+	fp.mut.Lock()
 	fp.running = false
+	fp.mut.Unlock()
+
 	for key, session := range fp.sessions {
 		session.Disconnect()
 		fp.Logger.Println("/DELETE", key)
@@ -243,6 +378,7 @@ func (fp *ForwardProxy) Stop() {
 func Listen(cCtx *cli.Context) error {
 	var port int = cCtx.Int("port")
 	var host string = cCtx.String("host")
+	var uima bool = cCtx.Bool("uima") // Use in-memory authentication server
 
 	logger, err := getLogger("FP", cCtx.String("log"))
 	if err != nil {
@@ -257,6 +393,7 @@ func Listen(cCtx *cli.Context) error {
 			port: port,
 		},
 		Logger: logger,
+		Uima:   uima,
 	}
 
 	err = proxy.Setup()
