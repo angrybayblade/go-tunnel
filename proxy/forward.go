@@ -100,7 +100,7 @@ type ForwardProxy struct {
 	sessions        map[string]*Session
 	requestHandlers map[string]interface{}
 	running         bool
-	auth            *auth.InMemory
+	auth            auth.AuthSession
 	mut             *sync.Mutex
 }
 
@@ -129,10 +129,7 @@ func (fp *ForwardProxy) Setup() error {
 		if err != nil {
 			return err
 		}
-		fp.auth = &auth.InMemory{
-			KeyPair: kp,
-			Store:   make(map[string]int),
-		}
+		fp.auth = auth.NewInMemorySession(kp)
 		pk, _ := kp.DumpPublicKey()
 		file := os.Getenv("PROXY_PUBLIC_KEY_FILE")
 		if file == "" {
@@ -140,6 +137,9 @@ func (fp *ForwardProxy) Setup() error {
 		}
 		os.WriteFile(file, pk, 0644)
 		fp.Logger.Println("Using in-memory authentication server; RSA public key for authentication is stored in", file)
+	} else {
+		fp.auth = auth.NewDefaultSession(DUMMY_KEY)
+		fp.Logger.Println("Using default key authentication server")
 	}
 	return nil
 }
@@ -248,7 +248,7 @@ func (fp *ForwardProxy) handleGenerateKey(request *headers.ProxyHeader, conn net
 	}
 
 	// TOFIX: Increase header size to allow different communication type
-	if len(fp.auth.Store) > 255 {
+	if len(fp.auth.Store()) > 255 {
 		fp.Logger.Printf("/GENERATE Max token limite reached")
 		response = &headers.ProxyHeader{
 			Code: headers.FpStatusMaxConnectionsLimitReached,
@@ -260,10 +260,10 @@ func (fp *ForwardProxy) handleGenerateKey(request *headers.ProxyHeader, conn net
 	response = &headers.ProxyHeader{
 		Code:    headers.FpStatusSuccess,
 		Key:     fp.auth.GenerateKey(),
-		Message: strconv.Itoa(fp.auth.Count),
+		Message: strconv.Itoa(fp.auth.Count()),
 	}
 	response.Write(conn)
-	fp.Logger.Println("/GENERATE Generate key with index:", fp.auth.Count)
+	fp.Logger.Println("/GENERATE Generate key with index:", fp.auth.Count())
 }
 
 func (fp *ForwardProxy) handleRevokeKey(request *headers.ProxyHeader, conn net.Conn) {
@@ -279,7 +279,7 @@ func (fp *ForwardProxy) handleRevokeKey(request *headers.ProxyHeader, conn net.C
 		return
 	}
 
-	keyIdbuf, err := fp.auth.KeyPair.Decrypt([]byte(request.Key))
+	keyIdbuf, err := fp.auth.(*auth.InMemory).KeyPair.Decrypt([]byte(request.Key))
 	if err != nil {
 		fp.Logger.Printf("/REVOKE Invalid signing key")
 		response = &headers.ProxyHeader{
@@ -292,7 +292,7 @@ func (fp *ForwardProxy) handleRevokeKey(request *headers.ProxyHeader, conn net.C
 	keyIdbuf = append(keyIdbuf, 0)
 	keyId := int(binary.LittleEndian.Uint16(keyIdbuf))
 	keyToDelete := ""
-	for key, id := range fp.auth.Store {
+	for key, id := range fp.auth.Store() {
 		if id == keyId {
 			keyToDelete = key
 			break
@@ -300,7 +300,7 @@ func (fp *ForwardProxy) handleRevokeKey(request *headers.ProxyHeader, conn net.C
 	}
 
 	if keyToDelete != "" {
-		delete(fp.auth.Store, keyToDelete)
+		fp.auth.DeleteKey(keyToDelete)
 		fp.Logger.Println("/REVOKE Revoked key with index:", keyId)
 	} else {
 		fp.Logger.Println("/REVOKE Key was not found:", keyId)
