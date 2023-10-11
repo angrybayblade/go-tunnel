@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -135,26 +136,28 @@ func (rp *ReverseProxy) Forward(proxyDial net.Conn, pumpBytes []byte, id int) {
 		Buffer: pumpBytes,
 	}
 	requestHeader.Read(proxyDial)
-	localDial.Write(requestHeader.Buffer)
-	if requestHeader.Headers["Content-Size"] != "" {
-		contentSize, err := strconv.Atoi(requestHeader.Headers["Content-Size"])
-		if err != nil {
-			rp.Logger.Println("/FORWARD Conection ID:", id, "->", "Error reading request payload")
+	requestHeader.Write(localDial)
+	if requestHeader.Headers["Content-Length"] != "" {
+		contenLength, _ := strconv.Atoi(requestHeader.Headers["Content-Length"])
+		if contenLength <= HttpRequestPipeChunkSize {
+			pumpBytes = make([]byte, contenLength)
+			proxyDial.Read(pumpBytes)
+			localDial.Write(pumpBytes)
 		} else {
-			pumpBytes = make([]byte, contentSize)
-			for {
-				n, err := proxyDial.Read(pumpBytes)
-				if err != nil {
-					break
-				}
-				localDial.Write(pumpBytes[:n])
-				if string(pumpBytes[n-4:n]) == headers.HttpHeaderSeparator {
-					break
-				}
+			fmt.Println(contenLength)
+			iter := int(math.Floor(float64(contenLength) / float64(HttpRequestPipeChunkSize)))
+			pumpBytes = make([]byte, HttpRequestPipeChunkSize)
+			for i := 0; i < iter; i++ {
+				proxyDial.Read(pumpBytes)
+				localDial.Write(pumpBytes)
 			}
+			pumpBytes = make([]byte, contenLength%HttpRequestPipeChunkSize)
+			proxyDial.Read(pumpBytes)
+			localDial.Write(pumpBytes)
 		}
 	}
 
+	pumpBytes = make([]byte, 64)
 	for {
 		n, err := localDial.Read(pumpBytes)
 		if err != nil {

@@ -5,6 +5,7 @@ import (
 )
 
 const MaxConnectionPoolSize int = 5
+const HttpRequestPipeChunkSize int = 64
 
 type Addr struct {
 	Host string
