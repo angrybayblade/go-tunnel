@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"strconv"
@@ -20,21 +21,28 @@ type Connection struct {
 }
 
 func (c *Connection) Forward(requestHeader *headers.HttpRequestHeader, requestConn net.Conn) {
-	// Investigate the usage of net.Pipe
-	pumpBytes := make([]byte, 1024)
+	var pumpBytes []byte
 	requestHeader.Write(c.conn)
 	if requestHeader.Headers["Content-Length"] != "" {
-		for {
-			n, err := requestConn.Read(pumpBytes)
-			if err != nil {
-				break
+		contenLength, _ := strconv.Atoi(requestHeader.Headers["Content-Length"])
+		if contenLength <= HttpRequestPipeChunkSize {
+			pumpBytes = make([]byte, contenLength)
+			requestConn.Read(pumpBytes)
+			c.conn.Write(pumpBytes)
+		} else {
+			iter := int(math.Floor(float64(contenLength) / float64(HttpRequestPipeChunkSize)))
+			pumpBytes = make([]byte, HttpRequestPipeChunkSize)
+			for i := 0; i < iter; i++ {
+				requestConn.Read(pumpBytes)
+				c.conn.Write(pumpBytes)
 			}
-			c.conn.Write(pumpBytes[:n])
-			if string(pumpBytes[n-4:n]) == headers.HttpHeaderSeparator {
-				break
-			}
+			pumpBytes = make([]byte, contenLength%HttpRequestPipeChunkSize)
+			requestConn.Read(pumpBytes)
+			c.conn.Write(pumpBytes)
 		}
 	}
+
+	pumpBytes = make([]byte, HttpRequestPipeChunkSize)
 	for {
 		n, err := c.conn.Read(pumpBytes)
 		if err != nil {
@@ -72,10 +80,9 @@ func (s *Session) Disconnect() {
 }
 
 func (s *Session) Forward(requestHeader *headers.HttpRequestHeader, rquestConn net.Conn) error {
-	var err error
 	if s.connected <= 0 {
 		defer rquestConn.Close()
-		_, err = headers.HttpResponseNoFreeConnection.Write(rquestConn)
+		_, err := headers.HttpResponseNoFreeConnection.Write(rquestConn)
 		if err != nil {
 			return fmt.Errorf("Request forward fail, no free connections available; Error writing response: %v", err)
 		}
