@@ -144,7 +144,6 @@ func (rp *ReverseProxy) Forward(proxyDial net.Conn, pumpBytes []byte, id int) {
 			proxyDial.Read(pumpBytes)
 			localDial.Write(pumpBytes)
 		} else {
-			fmt.Println(contenLength)
 			iter := int(math.Floor(float64(contenLength) / float64(HttpRequestPipeChunkSize)))
 			pumpBytes = make([]byte, HttpRequestPipeChunkSize)
 			for i := 0; i < iter; i++ {
