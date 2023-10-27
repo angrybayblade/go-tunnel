@@ -40,7 +40,7 @@ func (rp *ReverseProxy) Connect() error {
 	}
 
 	createRequest := &headers.ProxyHeader{
-		Code: headers.RpRequestCreate,
+		Code: headers.ProxyRequestCreatePool,
 		Key:  rp.Key,
 	}
 	_, err = createRequest.Write(conn)
@@ -54,7 +54,7 @@ func (rp *ReverseProxy) Connect() error {
 		return fmt.Errorf("Could not get the response from the proxy: %w", err)
 	}
 
-	if createResponse.Code == headers.FpStatusAuthError {
+	if createResponse.Code == headers.ProxyResponseAuthError {
 		return ErrProxyAuth
 	}
 
@@ -85,7 +85,7 @@ func (rp *ReverseProxy) Listen() {
 			}
 
 			joinRequest = &headers.ProxyHeader{
-				Code:    headers.RpRequestJoin,
+				Code:    headers.ProxyRequestJoinPool,
 				Key:     rp.sessionKey,
 				Message: strconv.Itoa(id),
 			}
@@ -104,12 +104,12 @@ func (rp *ReverseProxy) Listen() {
 				continue
 			}
 
-			if joinResponse.Code == headers.FpStatusMaxConnectionsLimitReached {
+			if joinResponse.Code == headers.ProxyResponseMaxConnectionsLimitReached {
 				rp.Logger.Println("Max connections limit reached")
 				break
 			}
 
-			if joinResponse.Code == headers.FpStatusAuthError {
+			if joinResponse.Code == headers.ProxyResponseAuthError {
 				rp.Quitch <- ErrProxyInvalidSessionKey
 				return
 			}
@@ -178,7 +178,7 @@ func (rp *ReverseProxy) Disconnect() {
 		return
 	}
 	deleteSessionRequest := &headers.ProxyHeader{
-		Code: headers.RpRequestDelete,
+		Code: headers.ProxyRequestDeletePool,
 		Key:  rp.sessionKey,
 	}
 	deleteSessionRequest.Write(conn)

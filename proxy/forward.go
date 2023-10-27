@@ -123,11 +123,11 @@ func (fp *ForwardProxy) Setup() error {
 	fp.Quitch = make(chan error)
 	fp.sessions = make(map[string]*Session)
 	fp.requestHandlers = map[string]interface{}{
-		headers.RpRequestCreate:      fp.handleCreate,
-		headers.RpRequestJoin:        fp.handleJoin,
-		headers.RpRequestDelete:      fp.handleDelete,
-		headers.FpRequestGenerateKey: fp.handleGenerateKey,
-		headers.FpRequestRevokeKey:   fp.handleRevokeKey,
+		headers.ProxyRequestCreatePool:  fp.handleCreate,
+		headers.ProxyRequestJoinPool:    fp.handleJoin,
+		headers.ProxyRequestDeletePool:  fp.handleDelete,
+		headers.ProxyRequestGenerateKey: fp.handleGenerateKey,
+		headers.ProxyRequestRevokeKey:   fp.handleRevokeKey,
 	}
 	fp.running = true
 	fp.mut = &sync.Mutex{}
@@ -175,15 +175,16 @@ func (fp *ForwardProxy) Listen() {
 func (fp *ForwardProxy) handleCreate(request *headers.ProxyHeader, conn net.Conn) {
 	if !fp.auth.IsValidAuthToken(request.Key) {
 		responseHeader := headers.ProxyHeader{
-			Code: headers.FpStatusAuthError,
+			Code: headers.ProxyResponseAuthError,
 			Key:  "",
 		}
 		responseHeader.Write(conn)
+		fp.Logger.Println("/CREATE invalid request; ", request.Key)
 		return
 	}
 	sessionKey := auth.Sha256([]byte(request.Key))
 	responseHeader := headers.ProxyHeader{
-		Code: headers.FpStatusSuccess,
+		Code: headers.ProxyResponseSucess,
 		Key:  sessionKey,
 	}
 	responseHeader.Write(conn)
@@ -201,7 +202,7 @@ func (fp *ForwardProxy) handleCreate(request *headers.ProxyHeader, conn net.Conn
 func (fp *ForwardProxy) handleJoin(request *headers.ProxyHeader, conn net.Conn) {
 	if fp.sessions[request.Key].connected >= MaxConnectionPoolSize {
 		response := &headers.ProxyHeader{
-			Code: headers.FpStatusMaxConnectionsLimitReached,
+			Code: headers.ProxyResponseMaxConnectionsLimitReached,
 			Key:  request.Key,
 		}
 		_, err := response.Write(conn)
@@ -213,7 +214,7 @@ func (fp *ForwardProxy) handleJoin(request *headers.ProxyHeader, conn net.Conn) 
 	} else {
 		// request.Message represents connection id
 		response := &headers.ProxyHeader{
-			Code: headers.FpStatusSuccess,
+			Code: headers.ProxyResponseSucess,
 			Key:  request.Key,
 		}
 		_, err := response.Write(conn)
@@ -239,16 +240,16 @@ func (fp *ForwardProxy) handleGenerateKey(request *headers.ProxyHeader, conn net
 	if !fp.Uima {
 		fp.Logger.Printf("/GENERATE not in UIMA mode")
 		response = &headers.ProxyHeader{
-			Code: headers.FpStatusErrorNotInUimaMode,
+			Code: headers.ProxyResponseNotInUimaMode,
 		}
 		response.Write(conn)
 		return
 	}
 
-	if !fp.auth.IsValidRequest([]byte(request.Key), headers.FpRequestGenerateKey) {
+	if !fp.auth.IsValidRequest([]byte(request.Key), headers.ProxyRequestGenerateKey) {
 		fp.Logger.Printf("/GENERATE Invalid signing key")
 		response = &headers.ProxyHeader{
-			Code: headers.FpStatusAuthError,
+			Code: headers.ProxyResponseAuthError,
 		}
 		response.Write(conn)
 		return
@@ -258,14 +259,14 @@ func (fp *ForwardProxy) handleGenerateKey(request *headers.ProxyHeader, conn net
 	if len(fp.auth.Store()) > 255 {
 		fp.Logger.Printf("/GENERATE Max token limite reached")
 		response = &headers.ProxyHeader{
-			Code: headers.FpStatusMaxConnectionsLimitReached,
+			Code: headers.ProxyResponseUIMAError,
 		}
 		response.Write(conn)
 		return
 	}
 
 	response = &headers.ProxyHeader{
-		Code:    headers.FpStatusSuccess,
+		Code:    headers.ProxyResponseSucess,
 		Key:     fp.auth.GenerateKey(),
 		Message: strconv.Itoa(fp.auth.Count()),
 	}
@@ -280,7 +281,7 @@ func (fp *ForwardProxy) handleRevokeKey(request *headers.ProxyHeader, conn net.C
 	if !fp.Uima {
 		fp.Logger.Printf("/REVOKE not in UIMA mode")
 		response = &headers.ProxyHeader{
-			Code: headers.FpStatusErrorNotInUimaMode,
+			Code: headers.ProxyResponseNotInUimaMode,
 		}
 		response.Write(conn)
 		return
@@ -290,7 +291,7 @@ func (fp *ForwardProxy) handleRevokeKey(request *headers.ProxyHeader, conn net.C
 	if err != nil {
 		fp.Logger.Printf("/REVOKE Invalid signing key")
 		response = &headers.ProxyHeader{
-			Code: headers.FpStatusAuthError,
+			Code: headers.ProxyResponseAuthError,
 		}
 		response.Write(conn)
 		return
@@ -314,7 +315,7 @@ func (fp *ForwardProxy) handleRevokeKey(request *headers.ProxyHeader, conn net.C
 	}
 
 	response = &headers.ProxyHeader{
-		Code: headers.FpStatusSuccess,
+		Code: headers.ProxyResponseSucess,
 		Key:  keyToDelete,
 	}
 	response.Write(conn)

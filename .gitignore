@@ -1,4 +1,6 @@
 tunnel
 temp/
+temp.go
+
 *.log
 *.pub

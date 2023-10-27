@@ -15,31 +15,31 @@ func generateKey(cCtx *cli.Context) error {
 		return err
 	}
 
-	requestEnc, err := kp.Encrypt([]byte(headers.FpRequestGenerateKey))
+	requestEnc, err := kp.Encrypt([]byte(headers.ProxyRequestGenerateKey))
 	if err != nil {
 		return err
 	}
 
 	proxyDial, _ := proxy.ConnectTo(cCtx.String("proxy"), true, 80)
 	request := &headers.ProxyHeader{
-		Code: headers.FpRequestGenerateKey,
+		Code: headers.ProxyRequestGenerateKey,
 		Key:  string(requestEnc),
 	}
 	request.Write(proxyDial)
 	response := &headers.ProxyHeader{}
 	response.Read(proxyDial)
 
-	if response.Code == headers.FpStatusErrorNotInUimaMode {
+	if response.Code == headers.ProxyResponseNotInUimaMode {
 		return errors.New("Proxy not running in the UIMA mode")
 	}
 
-	if response.Code == headers.FpStatusAuthError {
+	if response.Code == headers.ProxyResponseAuthError {
 		return errors.New("Invalid signing key")
 	}
 
 	// TOFIX: Increase header size to allow different communication type
-	if response.Code == headers.FpStatusMaxConnectionsLimitReached {
-		return errors.New("Invalid signing key")
+	if response.Code == headers.ProxyResponseUIMAError {
+		return errors.New("Max number of keys have been created, cannot create more")
 	}
 
 	fmt.Println("Generated", "\n  ID:", response.Message, "\n  Key:", response.Key)
