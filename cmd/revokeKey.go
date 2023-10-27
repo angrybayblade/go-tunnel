@@ -26,17 +26,17 @@ func revokeKey(cCtx *cli.Context) error {
 	requestEnc, err := kp.Encrypt(messageBytes[:1])
 	proxyDial, _ := proxy.ConnectTo(cCtx.String("proxy"), true, 80)
 	request := &headers.ProxyHeader{
-		Code: headers.FpRequestRevokeKey,
+		Code: headers.ProxyRequestRevokeKey,
 		Key:  string(requestEnc),
 	}
 	request.Write(proxyDial)
 	response := &headers.ProxyHeader{}
 	response.Read(proxyDial)
-	if response.Code == headers.FpStatusErrorNotInUimaMode {
+	if response.Code == headers.ProxyResponseNotInUimaMode {
 		return errors.New("Proxy not running in the UIMA mode")
 	}
 
-	if response.Code == headers.FpStatusAuthError {
+	if response.Code == headers.ProxyResponseAuthError {
 		return errors.New("Invalid signing key")
 	}
 
