@@ -27,10 +27,10 @@ func toIp(addr string, port string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(ips) != 1 {
+	if len(ips) == 0 {
 		return "", errors.New("Error performing IP Lookup")
 	}
-	ip := ips[0].String() + ":" + port
+	ip := ips[len(ips)-1].String() + ":" + port
 	return ip, nil
 }
 
@@ -52,7 +52,7 @@ func (rp *ReverseProxy) ProxyURI() string {
 		return rp.proxyIp
 	}
 	rp.proxyIp, _ = toIp(rp.Proxy, "80")
-	return rp.Proxy + ":" + "80"
+	return rp.proxyIp
 }
 
 func (rp *ReverseProxy) Connect() error {
