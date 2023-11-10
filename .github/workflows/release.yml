@@ -1,0 +1,28 @@
+name: Release Flow
+on:
+  release:
+    types: [published]
+jobs:
+  publish-helper-images:
+    name: Publish Helper Images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Docker login
+        env:
+          DOCKER_USER: ${{secrets.DOCKER_USER}}
+          DOCKER_PASSWORD: ${{secrets.DOCKER_PASSWORD}}
+        run: |
+          docker login -u $DOCKER_USER -p $DOCKER_PASSWORD
+      - name: Set up support for multi platform build
+        run: |
+          docker run --privileged --rm tonistiigi/binfmt --install all
+          docker buildx create --use --name multibuild
+          docker buildx inspect --bootstrap
+      - name: Build and push version tagged images
+        run: |
+          # export `TAG` variable
+          export VERSION=$(git describe --tags --abbrev=0)
+          echo "Building images for $VERSION"
+          docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v8 -t angrybayblade/tunnel:$VERSION . --push
+          docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v8 -t angrybayblade/tunnel:latest . --push
