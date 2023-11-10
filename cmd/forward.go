@@ -6,10 +6,11 @@ import (
 )
 
 func forward(cCtx *cli.Context) error {
+	var err error
 	var port int = cCtx.Int("port")
 	var host string = cCtx.String("host")
 	var key string = cCtx.String("key")
-	var Proxy string = cCtx.String("proxy")
+	var addr string = cCtx.String("proxy")
 
 	logger, err := getLogger("RP", cCtx.String("log"))
 	if err != nil {
@@ -23,7 +24,7 @@ func forward(cCtx *cli.Context) error {
 			Port: port,
 		},
 		Key:    key,
-		Proxy:  Proxy,
+		Proxy:  addr,
 		Logger: logger,
 	}
 	err = proxy.Connect()

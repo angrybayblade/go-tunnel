@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -15,21 +16,42 @@ import (
 
 const DUMMY_KEY string = "0000000000000000000000000000000000000000000"
 
+func toIp(addr string, port string) (string, error) {
+	if strings.Contains(addr, ":") {
+		split := strings.Split(addr, ":")
+		addr = split[0]
+		port = split[1]
+	}
+
+	ips, err := net.LookupIP(addr)
+	if err != nil {
+		return "", err
+	}
+	if len(ips) != 1 {
+		return "", errors.New("Error performing IP Lookup")
+	}
+	ip := ips[0].String() + ":" + port
+	return ip, nil
+}
+
 type ReverseProxy struct {
-	Addr        Addr
-	Logger      *log.Logger
-	Proxy       string
-	Key         string
-	Quitch      chan error
+	Addr   Addr
+	Logger *log.Logger
+	Proxy  string
+	Key    string
+	Quitch chan error
+
 	sessionKey  string
 	waitGroup   *sync.WaitGroup
 	connections chan int
+	proxyIp     string
 }
 
 func (rp *ReverseProxy) ProxyURI() string {
-	if strings.Contains(rp.Proxy, ":") {
-		return rp.Proxy
+	if rp.proxyIp != "" {
+		return rp.proxyIp
 	}
+	rp.proxyIp, _ = toIp(rp.Proxy, "80")
 	return rp.Proxy + ":" + "80"
 }
 
